@@ -126,10 +126,9 @@ To ensure 100% interactive stability, walk through each of the following test sc
 2. Use the search bar to filter by keywords or use the intent dropdown to filter by category.
 3. Refresh the browser page.
 4. Verify that your saved entries reload from Cloud Firestore seamlessly under your user profile.
-5. Click **"Analyze My Cognitive Patterns"** (if 2+ entries exist) and verify cross-entry cognitive trajectory analysis renders in Markdown.
-6. Click the trash icon on an entry to trigger the in-app confirmation modal.
-7. Click **"Delete Reflection"** in the modal and verify that the entry is permanently removed from Firestore and the dashboard list updates immediately.
-8. Click **Sign Out** to ensure clean session termination and return to the landing page.
+5. Click the trash icon on an entry to trigger the in-app confirmation modal.
+6. Click **"Delete Reflection"** in the modal and verify that the entry is permanently removed from Firestore and the dashboard list updates immediately.
+7. Click **Sign Out** to ensure clean session termination and return to the landing page.
 
 ### Test Case 5: Direct Google Calendar API Integration & Maps Detection
 1. In a reflection session, enter a message mentioning commitments and/or locations (e.g., *"I have an interview next Friday at 3 PM and I also need to visit Apollo Hospital, Velachery."*).
@@ -154,5 +153,57 @@ To ensure 100% interactive stability, walk through each of the following test sc
 4. On an actionable response with a suggested Google Calendar event, click **"Create Event in Google Calendar"**.
 5. Observe that the calendar button displays its own localized loading spinner (`isCreatingCalendarEvent`) without triggering or reviving the chat contemplation indicator.
 6. Click **"Open in Google Maps"** on a location card and verify that the maps button shows its own localized state (`isOpeningMaps`) independently of the reflection chat stream.
+
+### Test Case 7: Structured Long-Term Cognitive Memory & Growth Matrix
+1. Ensure you have at least 2 saved reflection sessions in MindMirror.
+2. On the Dashboard, navigate to the **"Long-Term Cognitive Memory & Growth"** banner.
+3. Click **"Analyze My Cognitive Patterns"** (button ID: `generate-patterns-btn`).
+4. Verify that the button switches to its active loading state (**"Analyzing Memory..."** with spinning sparkles icon) while Gemini analyzes your cognitive history.
+5. Once complete, verify that the single text block is replaced with 5 modular, high-contrast cards conforming to MindMirror's beige/black aesthetic:
+   - **Recurring Goals Card**: Displays key recurring ambitions and intentions.
+   - **Recurring Challenges Card**: Displays cognitive biases, friction points, and recurring hurdles.
+   - **Strengths Gemini Observed Card**: Displays metacognition, resilience, and emotional clarity traits with Check icons.
+   - **Growth Trend Card**: Spans a prominent wide layout detailing your longitudinal mindset evolution and trajectory.
+   - **Recommended Focus Card**: Displays targeted prompt questions and focus exercises for subsequent sessions.
+6. Confirm the overview metadata bar displays the last analyzed timestamp and the reflection count processed.
+7. Refresh the browser and verify that the structured cognitive pattern cards persist from Cloud Firestore (`/users/{userId}/patterns/latest`) without requiring a re-analysis.
+8. Click **"Gemini's Full Cognitive Analysis"** (`#toggle-full-analysis-btn`) to verify the collapsible detailed narrative expands and collapses cleanly with structured Markdown sections (never raw JSON syntax).
+
+### Test Case 8: Weekly Reflection Digest & Direct Gmail Integration
+1. On the Dashboard or Weekly Insights page, locate the **"Weekly Reflection Digest"** section.
+2. Click **"Generate This Week's Digest"** (`#generate-weekly-digest-btn` or `#generate-weekly-digest-main-btn`).
+3. Verify that the button switches to its active state (**"Synthesizing Digest..."** with animated icon) while Gemini analyzes reflections from the current week alongside long-term cognitive patterns.
+4. Verify that the Weekly Reflection Digest displays:
+   - **Week Header & Reflection Count**: Displays the current week date range (e.g., `2026-08-24 – 2026-08-30`) and number of reflection sessions analyzed.
+   - **Weekly Overview Card**: 2-3 sentence executive synthesis of mindset and emotional momentum.
+   - **Biggest Win Card**: Grounded breakthrough or positive outcome achieved during the week.
+   - **Biggest Challenge Card**: Key friction point or cognitive hurdle navigated.
+   - **Growth Insight Card**: Metacognitive insight on emotional resilience and mindset evolution.
+   - **Next Week Focus Card**: Bulleted list of strategic focus areas and intentional practices.
+5. Click **"Open Modal View"** to inspect the pop-up modal view and test regeneration.
+6. Click **"Send to Gmail"** (`#send-to-gmail-btn` or `#weekly-send-gmail-btn`):
+   - The first time this is invoked, Google Sign-In prompts for Gmail send permissions (`https://www.googleapis.com/auth/gmail.send`).
+   - The digest is formatted into a styled HTML email and dispatched to your authenticated Google account via the Gmail REST API in the background.
+   - Verify a green success toast appears confirming dispatch to your email address.
+   - The digest card updates with a confirmed **"Sent to Gmail"** indicator.
+7. Refresh the browser and verify that the Weekly Digest persists from Cloud Firestore (`/users/{userId}/weeklyDigests/{weekId}`) without data loss.
+
+### Test Case 9: Multi-Page Routing & Navigation Architecture
+1. Verify the persistent fixed sidebar on the left on desktop screens (and drawer on mobile screens via the hamburger button).
+2. Click **"Dashboard"** (`/dashboard`):
+   - Verify it displays the lightweight overview with stats, quick reflection modes, recent 3 reflections, Cognitive Memory preview card, and Weekly Insights preview card.
+3. Click **"Reflections"** (`/reflections`):
+   - Verify it loads the dedicated reflections archive with the search bar, category filters, and full list of past reflections.
+   - Click a reflection card to open the reflection canvas; close it and confirm you return to `/reflections`.
+4. Click **"Cognitive Memory"** (`/memory`):
+   - Verify it loads the dedicated cognitive growth analysis page with the 5 modular cards and the "Analyze My Cognitive Patterns" action.
+5. Click **"Weekly Insights"** (`/weekly-insights`):
+   - Verify it loads the dedicated executive digest page with week bounds, the "Generate This Week's Digest" trigger, and the "Send to Gmail" direct dispatch.
+6. Click **"Calendar & Places"** (`/calendar`):
+   - Verify it displays all Google Calendar commitments and detected Google Maps locations with filter tabs and external links.
+7. Click **"Settings"** (`/settings`):
+   - Verify it displays user identity information (UID, email), active Gemini AI model infrastructure ladder, and connected services status with Sign Out button.
+8. Use browser Back and Forward buttons:
+   - Verify the application route changes seamlessly without full page reloads, preserving client state.
 
 

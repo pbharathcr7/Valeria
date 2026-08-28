@@ -58,12 +58,123 @@
         }
       },
       "required": ["id", "userId", "title", "intent", "createdAt", "updatedAt", "messages"]
+    },
+    "CognitivePatternAnalysis": {
+      "title": "CognitivePatternAnalysis",
+      "description": "Structured long-term cognitive patterns, recurring goals, challenges, observed strengths, growth trends, and recommended focus areas",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Pattern record identifier"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner UID"
+        },
+        "analyzedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when analysis occurred"
+        },
+        "entryCount": {
+          "type": "number",
+          "description": "Number of journal entries analyzed"
+        },
+        "overview": {
+          "type": "string",
+          "description": "High-level cognitive synthesis summary"
+        },
+        "recurringGoals": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Recurring goals identified across reflections"
+        },
+        "recurringChallenges": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Recurring cognitive hurdles and friction points"
+        },
+        "strengthsObserved": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Key cognitive and emotional strengths observed by Gemini"
+        },
+        "growthTrend": {
+          "type": "string",
+          "description": "Observed trajectory and mental resilience growth trend"
+        },
+        "recommendedFocus": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Actionable focus areas and exercises recommended for next reflections"
+        },
+        "rawAnalysis": {
+          "type": "string",
+          "description": "Full unparsed analysis fallback"
+        }
+      },
+      "required": ["userId", "analyzedAt", "recurringGoals", "recurringChallenges", "strengthsObserved", "growthTrend", "recommendedFocus"]
+    },
+    "WeeklyDigest": {
+      "title": "WeeklyDigest",
+      "description": "Weekly reflection cognitive digest synthesized from current week entries",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Week identifier e.g. 2026-W35"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner UID"
+        },
+        "weekStart": {
+          "type": "string",
+          "description": "Start date of the week (YYYY-MM-DD)"
+        },
+        "weekEnd": {
+          "type": "string",
+          "description": "End date of the week (YYYY-MM-DD)"
+        },
+        "generatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Generation timestamp"
+        },
+        "sentAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when sent to Gmail"
+        },
+        "recipientEmail": {
+          "type": "string",
+          "description": "Email address digest was dispatched to"
+        },
+        "entryCount": {
+          "type": "number",
+          "description": "Number of reflections included in this week digest"
+        },
+        "content": {
+          "type": "object",
+          "description": "Structured digest sections: weeklyOverview, biggestWin, biggestChallenge, growthInsight, nextWeekFocus"
+        }
+      },
+      "required": ["id", "userId", "weekStart", "weekEnd", "generatedAt", "content"]
     }
   },
   "firestore": {
     "/users/{userId}/interactions/{interactionId}": {
       "schema": "JournalEntry",
       "description": "User-isolated multi-turn cognitive reflections and Gemini dialogue interactions"
+    },
+    "/users/{userId}/patterns/{patternId}": {
+      "schema": "CognitivePatternAnalysis",
+      "description": "User-isolated structured cognitive memory and growth pattern analysis"
+    },
+    "/users/{userId}/weeklyDigests/{weekId}": {
+      "schema": "WeeklyDigest",
+      "description": "User-isolated weekly cognitive summaries and email dispatch records"
     }
   }
 }

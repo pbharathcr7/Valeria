@@ -5,14 +5,11 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
       
-      // User interactions, journal entries, and reflections isolated strictly to owner
-      match /interactions/{interactionId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-      }
-
-      match /entries/{entryId} {
+      // User interactions, journal entries, cognitive patterns, and memory subcollections
+      match /{allPaths=**} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
     }
   }
 }
+

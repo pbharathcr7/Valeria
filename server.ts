@@ -268,6 +268,64 @@ You MUST respond strictly with valid JSON conforming to this TypeScript schema:
   }
 });
 
+// Helper to parse and ensure structured cognitive pattern analysis
+function parseStructuredPatterns(rawText: string, entryCount: number) {
+  let cleaned = rawText.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (parsed && typeof parsed === 'object') {
+      return {
+        overview: typeof parsed.overview === 'string' ? parsed.overview : 'Cognitive patterns synthesis across past reflection entries.',
+        recurringGoals: Array.isArray(parsed.recurringGoals) ? parsed.recurringGoals.map(String).filter(Boolean) : [],
+        recurringChallenges: Array.isArray(parsed.recurringChallenges) ? parsed.recurringChallenges.map(String).filter(Boolean) : [],
+        strengthsObserved: Array.isArray(parsed.strengthsObserved) ? parsed.strengthsObserved.map(String).filter(Boolean) : [],
+        growthTrend: typeof parsed.growthTrend === 'string' ? parsed.growthTrend : (Array.isArray(parsed.growthTrend) ? parsed.growthTrend.join(' ') : 'Demonstrating ongoing commitment to self-inquiry and mindful perspective.'),
+        recommendedFocus: Array.isArray(parsed.recommendedFocus) ? parsed.recommendedFocus.map(String).filter(Boolean) : [],
+        rawAnalysis: rawText,
+        analyzedAt: new Date().toISOString(),
+        entryCount
+      };
+    }
+  } catch (e) {
+    // JSON parse fallback below
+  }
+
+  // Regex extraction fallback for markdown text if returned
+  const extractSection = (keywords: string[]): string[] => {
+    for (const kw of keywords) {
+      const regex = new RegExp(`(?:###?\\s*.*${kw}.*\\n)([\\s\\S]*?)(?=(?:###?\\s*|$))`, 'i');
+      const match = rawText.match(regex);
+      if (match && match[1]) {
+        return match[1]
+          .split('\n')
+          .map(line => line.replace(/^[\s*•\-–—\d.)]+/, '').trim())
+          .filter(line => line.length > 0);
+      }
+    }
+    return [];
+  };
+
+  const goals = extractSection(['Goals', 'Themes', 'Focus Areas', 'Intentions', 'Recurring Goals']);
+  const challenges = extractSection(['Challenges', 'Hurdles', 'Obstacles', 'Biases', 'Recurring Challenges']);
+  const strengths = extractSection(['Strengths', 'Resilience', 'Observed', 'Positive']);
+  const focus = extractSection(['Recommendations', 'Recommended', 'Next Steps', 'Action', 'Focus']);
+  
+  const growthTrendMatch = rawText.match(/(?:###?\s*.*(?:Growth|Trajectory|Trend|Resilience).*\n)([\s\S]*?)(?=(?:###?\\s*|$))/i);
+  const growthTrend = growthTrendMatch ? growthTrendMatch[1].trim() : rawText.slice(0, 300);
+
+  return {
+    overview: 'Cognitive growth analysis across your past reflection sessions.',
+    recurringGoals: goals.length > 0 ? goals : ['Deep self-inquiry and intentional focus', 'Translating contemplation into tangible life actions'],
+    recurringChallenges: challenges.length > 0 ? challenges : ['Managing cognitive load and task switching', 'Overcoming situational self-doubt'],
+    strengthsObserved: strengths.length > 0 ? strengths : ['High emotional clarity and honesty', 'Proactive mindset reframing'],
+    growthTrend: growthTrend || 'Progressive development of emotional grounding, moving from reactive stress toward structured mental models.',
+    recommendedFocus: focus.length > 0 ? focus : ['Schedule regular morning reflection checkpoints', 'Apply cognitive restructuring during high-pressure decisions'],
+    rawAnalysis: rawText,
+    analyzedAt: new Date().toISOString(),
+    entryCount
+  };
+}
+
 // API: Weekly Cognitive Growth & Patterns Analyzer
 app.post('/api/reflect/patterns', async (req: Request, res: Response) => {
   try {
@@ -275,39 +333,164 @@ app.post('/api/reflect/patterns', async (req: Request, res: Response) => {
     const { entries = [] } = body;
 
     if (!Array.isArray(entries) || entries.length === 0) {
-      return res.json({
-        patterns: "Start writing daily reflections to unlock long-term AI memory and cognitive pattern analytics."
+      return res.status(400).json({
+        error: "No entries provided for cognitive analysis."
       });
     }
 
     const summaries = entries.slice(0, 10).map((e: any, idx: number) => {
-      return `[Entry ${idx + 1} (${e.createdAt}) - ${e.title} (${e.intent})]:\nSummary: ${e.summary || 'N/A'}\nTakeaways: ${(e.insights?.takeaways || []).join('; ')}\nThemes: ${(e.insights?.keyThemes || []).join(', ')}`;
+      return `[Entry ${idx + 1} (${e.createdAt || 'Recent'}) - ${e.title || 'Untitled'} (${e.intent || 'deep_reflection'})]:\nSummary: ${e.summary || 'N/A'}\nTakeaways: ${(e.insights?.takeaways || []).join('; ')}\nThemes: ${(e.insights?.keyThemes || []).join(', ')}`;
     }).join('\n\n');
 
-    const prompt = `Review the user's past journal entries and synthesize their overarching cognitive trends, emotional trajectory, recurring themes, and mental resilience growth.
+    const prompt = `Review the user's past journal entries and synthesize their overarching cognitive trends, emotional trajectory, recurring themes, mental resilience, and growth areas.
 
 Past Entries:
 """
 ${summaries}
 """
 
-Format your response in warm, elegant Markdown with these sections:
-### 🧠 Cognitive Themes & Focus Areas
-### 📈 Emotional Trajectory & Resilience
-### 💡 Strategic Recommendations for Your Second Brain`;
+Synthesize a comprehensive, high-quality cognitive patterns analysis and return strictly a valid JSON object conforming to this schema:
+{
+  "overview": "A warm, high-level 1-2 sentence executive synthesis of their cognitive journey and mindset patterns across these entries.",
+  "recurringGoals": [
+    "Clear, concise recurring ambition, intention, or desired state observed across reflections"
+  ],
+  "recurringChallenges": [
+    "Clear, concise recurring hurdle, cognitive bias, or friction point observed"
+  ],
+  "strengthsObserved": [
+    "Specific observable emotional resilience, metacognition, or problem-solving strength"
+  ],
+  "growthTrend": "A thoughtful 2-4 sentence narrative detailing their mindset trajectory, how their thinking has evolved across entries, and positive behavioral shifts.",
+  "recommendedFocus": [
+    "Tactical strategic reflection prompt, mental exercise, or focus area for future reflections"
+  ]
+}`;
 
     const result = await generateContentWithFallback({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }]
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      responseMimeType: 'application/json'
     });
+
+    const structuredPatterns = parseStructuredPatterns(result.text, entries.length);
 
     return res.json({
       insights: result.text,
+      structuredPatterns,
+      patterns: structuredPatterns,
       modelUsed: result.modelUsed
     });
   } catch (error: any) {
     console.error('Error in /api/reflect/patterns:', error);
     return res.status(500).json({
       error: error?.message || 'Failed to generate pattern insights.'
+    });
+  }
+});
+
+// API: Weekly Reflection Digest Generator
+app.post('/api/reflect/weekly-digest', async (req: Request, res: Response) => {
+  try {
+    const body = (req.body && typeof req.body === 'object') ? req.body : {};
+    const { entries = [], weekStart, weekEnd, cognitivePatterns } = body;
+
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return res.status(400).json({
+        error: "No reflections found for the current week to generate a digest."
+      });
+    }
+
+    const reflectionSummaries = entries.map((e: any, idx: number) => {
+      const dateStr = e.createdAt ? new Date(e.createdAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'This week';
+      return `[Reflection ${idx + 1} (${dateStr}) - "${e.title || 'Untitled'}" (Intent: ${e.intent || 'deep_reflection'})]:
+Summary: ${e.summary || (e.messages?.[0]?.content ? e.messages[0].content.slice(0, 150) + '...' : 'N/A')}
+Mood: ${e.insights?.mood || 'Neutral'}
+Key Themes: ${(e.insights?.keyThemes || []).join(', ') || 'N/A'}
+Takeaways: ${(e.insights?.takeaways || []).join('; ') || 'N/A'}
+Actions: ${(e.insights?.actionItems || []).join('; ') || 'None'}`;
+    }).join('\n\n');
+
+    let memoryContext = '';
+    if (cognitivePatterns && typeof cognitivePatterns === 'object') {
+      memoryContext = `
+Long-term Cognitive Patterns Context:
+- Recurring Goals: ${(cognitivePatterns.recurringGoals || []).join('; ')}
+- Recurring Challenges: ${(cognitivePatterns.recurringChallenges || []).join('; ')}
+- Observed Strengths: ${(cognitivePatterns.strengthsObserved || []).join('; ')}
+- Growth Trend: ${cognitivePatterns.growthTrend || 'N/A'}
+`;
+    }
+
+    const prompt = `You are MindMirror's Cognitive Synthesis Engine. Analyze the user's reflection entries from this current week (${weekStart || 'This Week'} to ${weekEnd || 'Today'}) and generate a structured Weekly Reflection Digest.
+
+User's Weekly Reflections (${entries.length} sessions):
+"""
+${reflectionSummaries}
+"""
+${memoryContext}
+
+Synthesize a high-impact, grounded, and encouraging weekly digest. Return strictly a JSON object conforming to this exact schema:
+{
+  "weeklyOverview": "A thoughtful 2-3 sentence executive synthesis of their overarching mindset, primary emotional theme, and cognitive momentum across this week's reflections.",
+  "biggestWin": "A specific, grounded breakthrough, productive reframing, positive outcome, or meaningful victory achieved during this week's reflections.",
+  "biggestChallenge": "The primary friction point, cognitive hurdle, stressor, or obstacle they navigated this week, along with how they addressed or sat with it.",
+  "growthInsight": "A deep psychological or metacognitive insight highlighting their emotional resilience, mindset shift, or behavioral evolution over the week.",
+  "nextWeekFocus": [
+    "Clear, actionable focus area, prompt question, or intentional practice to carry into the upcoming week (provide 2 to 3 points)"
+  ]
+}`;
+
+    const result = await generateContentWithFallback({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      responseMimeType: 'application/json'
+    });
+
+    let structuredContent: any = null;
+    try {
+      structuredContent = JSON.parse(result.text);
+    } catch {
+      const match = result.text.match(/\{[\s\S]*\}/);
+      if (match) {
+        try {
+          structuredContent = JSON.parse(match[0]);
+        } catch {
+          // fallback
+        }
+      }
+    }
+
+    if (!structuredContent) {
+      structuredContent = {
+        weeklyOverview: "You maintained consistent introspective practice this week, building clarity and emotional awareness across your reflections.",
+        biggestWin: "Consistently identifying underlying emotions and engaging in constructive self-inquiry.",
+        biggestChallenge: "Balancing immediate daily demands with long-term strategic intentions.",
+        growthInsight: "Observed greater metacognitive poise and willingness to reframe challenges objectively.",
+        nextWeekFocus: [
+          "Continue daily structured reflections on core priorities.",
+          "Protect dedicated focus blocks for high-leverage goals."
+        ]
+      };
+    }
+
+    // Ensure array hygiene
+    if (!Array.isArray(structuredContent.nextWeekFocus) || structuredContent.nextWeekFocus.length === 0) {
+      structuredContent.nextWeekFocus = [
+        "Anchor your mornings with intentional check-ins.",
+        "Apply cognitive restructuring when unexpected friction arises."
+      ];
+    }
+
+    return res.json({
+      content: structuredContent,
+      weekStart: weekStart || new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0],
+      weekEnd: weekEnd || new Date().toISOString().split('T')[0],
+      entryCount: entries.length,
+      modelUsed: result.modelUsed
+    });
+  } catch (error: any) {
+    console.error('Error in /api/reflect/weekly-digest:', error);
+    return res.status(500).json({
+      error: error?.message || 'Failed to generate weekly digest.'
     });
   }
 });

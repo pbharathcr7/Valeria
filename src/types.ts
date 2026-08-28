@@ -64,3 +64,38 @@ export interface UserProfile {
   createdAt: string;
   totalReflections?: number;
 }
+
+export interface CognitivePatternAnalysis {
+  id?: string;
+  userId?: string;
+  analyzedAt: string; // ISO timestamp
+  entryCount: number;
+  overview?: string;
+  recurringGoals: string[];
+  recurringChallenges: string[];
+  strengthsObserved: string[];
+  growthTrend: string;
+  recommendedFocus: string[];
+  rawAnalysis?: string;
+}
+
+export interface WeeklyDigestContent {
+  weeklyOverview: string;
+  biggestWin: string;
+  biggestChallenge: string;
+  growthInsight: string;
+  nextWeekFocus: string[];
+}
+
+export interface WeeklyDigest {
+  id: string; // weekId e.g. "2026-W35" or ISO date range
+  userId: string;
+  weekStart: string; // YYYY-MM-DD
+  weekEnd: string; // YYYY-MM-DD
+  generatedAt: string; // ISO string
+  sentAt?: string | null; // ISO string
+  recipientEmail?: string | null;
+  entryCount: number;
+  content: WeeklyDigestContent;
+}
+

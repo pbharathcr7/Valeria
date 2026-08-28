@@ -11,12 +11,28 @@ import {
   deleteDoc, 
   query, 
   orderBy,
-  sanitizePayload
+  sanitizePayload,
+  loadCognitivePatterns,
+  saveCognitivePatterns,
+  loadWeeklyDigest,
+  saveWeeklyDigest
 } from './lib/firebase';
 import { LandingPage } from './components/LandingPage';
-import { Dashboard } from './components/Dashboard';
+import { AppLayout } from './components/AppLayout';
+import { DashboardPage } from './pages/DashboardPage';
+import { ReflectionsPage } from './pages/ReflectionsPage';
+import { CognitiveMemoryPage } from './pages/CognitiveMemoryPage';
+import { WeeklyInsightsPage } from './pages/WeeklyInsightsPage';
+import { CalendarPlacesPage } from './pages/CalendarPlacesPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { ReflectionCanvas } from './components/ReflectionCanvas';
-import { UserProfile, JournalEntry, ReflectionIntent } from './types';
+import { 
+  UserProfile, 
+  JournalEntry, 
+  ReflectionIntent, 
+  CognitivePatternAnalysis, 
+  WeeklyDigest 
+} from './types';
 import { User } from 'firebase/auth';
 
 export default function App() {
@@ -29,9 +45,86 @@ export default function App() {
   const [entriesLoading, setEntriesLoading] = useState<boolean>(false);
   const [isSavingEntry, setIsSavingEntry] = useState<boolean>(false);
 
-  // View state: 'dashboard' | 'reflection'
-  const [view, setView] = useState<'dashboard' | 'reflection'>('dashboard');
+  // Longitudinal Memory & Weekly Digest State
+  const [cognitivePatterns, setCognitivePatterns] = useState<CognitivePatternAnalysis | null>(null);
+  const [isSynthesizingPatterns, setIsSynthesizingPatterns] = useState<boolean>(false);
+  const [patternError, setPatternError] = useState<string | null>(null);
+
+  const [weeklyDigest, setWeeklyDigest] = useState<WeeklyDigest | null>(null);
+  const [isGeneratingDigest, setIsGeneratingDigest] = useState<boolean>(false);
+  const [digestError, setDigestError] = useState<string | null>(null);
+
+  // Active reflection canvas state (overlays when reflecting)
+  const [isReflecting, setIsReflecting] = useState<boolean>(false);
   const [activeEntry, setActiveEntry] = useState<JournalEntry | null>(null);
+
+  // Multi-page navigation state
+  const getInitialPath = (): string => {
+    const path = window.location.pathname;
+    const validPaths = ['/dashboard', '/reflections', '/memory', '/weekly-insights', '/calendar', '/settings'];
+    if (validPaths.includes(path)) {
+      return path;
+    }
+    return '/dashboard';
+  };
+
+  const [currentPath, setCurrentPath] = useState<string>(getInitialPath());
+
+  // Listen to browser forward/backward navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname;
+      const validPaths = ['/dashboard', '/reflections', '/memory', '/weekly-insights', '/calendar', '/settings'];
+      if (validPaths.includes(path)) {
+        setCurrentPath(path);
+      } else {
+        setCurrentPath('/dashboard');
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  // Safe navigation function updating state & history API
+  const handleNavigate = (path: string) => {
+    setCurrentPath(path);
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, '', path);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Helper for current week ID calculation
+  const getCurrentWeekInfo = () => {
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const distanceToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + distanceToMonday);
+    monday.setHours(0, 0, 0, 0);
+
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23, 59, 59, 999);
+
+    const weekStartStr = monday.toISOString().split('T')[0];
+    const weekEndStr = sunday.toISOString().split('T')[0];
+
+    // Compute ISO Week number
+    const target = new Date(monday.valueOf());
+    const dayNr = (monday.getDay() + 6) % 7;
+    target.setDate(target.getDate() - dayNr + 3);
+    const firstThursday = target.valueOf();
+    target.setMonth(0, 1);
+    if (target.getDay() !== 4) {
+      target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
+    }
+    const weekNum = 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000);
+    const weekId = `${monday.getFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+
+    return { weekStart: weekStartStr, weekEnd: weekEndStr, weekId, monday, sunday };
+  };
 
   // Subscribe to Firebase Auth
   useEffect(() => {
@@ -46,10 +139,13 @@ export default function App() {
         };
         setCurrentUser(userProfile);
         loadUserEntries(user.uid);
+        loadPatternsAndDigest(user.uid);
       } else {
         setCurrentUser(null);
         setEntries([]);
-        setView('dashboard');
+        setCognitivePatterns(null);
+        setWeeklyDigest(null);
+        setIsReflecting(false);
         setActiveEntry(null);
       }
       setAuthLoading(false);
@@ -63,7 +159,6 @@ export default function App() {
     setEntriesLoading(true);
     try {
       const { db } = await initFirebase();
-      // Secure path: /users/{userId}/interactions
       const entriesRef = collection(db, 'users', userId, 'interactions');
       const q = query(entriesRef, orderBy('createdAt', 'desc'));
       const snapshot = await getDocs(q);
@@ -79,6 +174,24 @@ export default function App() {
       console.error('Error fetching reflections from Firestore:', err);
     } finally {
       setEntriesLoading(false);
+    }
+  };
+
+  // Load cognitive patterns & current week digest from Firestore
+  const loadPatternsAndDigest = async (userId: string) => {
+    try {
+      const patternsData = await loadCognitivePatterns(userId);
+      if (patternsData) {
+        setCognitivePatterns(patternsData as CognitivePatternAnalysis);
+      }
+
+      const weekInfo = getCurrentWeekInfo();
+      const digestData = await loadWeeklyDigest(userId, weekInfo.weekId);
+      if (digestData) {
+        setWeeklyDigest(digestData as WeeklyDigest);
+      }
+    } catch (err) {
+      console.error('Failed to load patterns or digest from Firestore:', err);
     }
   };
 
@@ -113,7 +226,6 @@ export default function App() {
       const { db } = await initFirebase();
       const entryRef = doc(db, 'users', currentUser.uid, 'interactions', entryToSave.id);
       
-      // Strict Undefined-Stripping before passing to Firestore
       const cleanData = sanitizePayload({
         ...entryToSave,
         userId: currentUser.uid,
@@ -152,7 +264,7 @@ export default function App() {
       // Update local state immediately
       setEntries(prev => prev.filter(e => e.id !== entryId));
       if (activeEntry?.id === entryId) {
-        setView('dashboard');
+        setIsReflecting(false);
         setActiveEntry(null);
       }
     } catch (err: any) {
@@ -161,7 +273,148 @@ export default function App() {
     }
   };
 
-  // Navigation handlers
+  // Synthesize Cognitive Patterns across reflections
+  const handleSynthesizePatterns = async () => {
+    if (entries.length === 0 || isSynthesizingPatterns) return;
+    setIsSynthesizingPatterns(true);
+    setPatternError(null);
+
+    try {
+      const resp = await fetch('/api/reflect/patterns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entries })
+      });
+
+      if (!resp.ok) {
+        const errJson = await resp.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Could not analyze cognitive patterns.');
+      }
+      const data = await resp.json();
+      
+      const structured: CognitivePatternAnalysis = data.structuredPatterns || data.patterns || {
+        analyzedAt: new Date().toISOString(),
+        entryCount: entries.length,
+        overview: 'Cognitive growth analysis across your recent reflection entries.',
+        recurringGoals: [],
+        recurringChallenges: [],
+        strengthsObserved: [],
+        growthTrend: data.insights || '',
+        recommendedFocus: [],
+        rawAnalysis: data.insights
+      };
+
+      setCognitivePatterns(structured);
+
+      if (currentUser?.uid) {
+        await saveCognitivePatterns(currentUser.uid, structured);
+      }
+    } catch (e: any) {
+      console.error('Failed to generate insights:', e);
+      setPatternError(e?.message || 'Failed to generate pattern insights. Please try again.');
+    } finally {
+      setIsSynthesizingPatterns(false);
+    }
+  };
+
+  // Generate Weekly Reflection Digest
+  const handleGenerateWeeklyDigest = async () => {
+    const weekInfo = getCurrentWeekInfo();
+    const currentWeekEntries = entries.filter(e => {
+      if (!e.createdAt) return false;
+      const entryDate = new Date(e.createdAt);
+      return entryDate >= weekInfo.monday && entryDate <= weekInfo.sunday;
+    });
+
+    const targetEntries = currentWeekEntries.length > 0 ? currentWeekEntries : entries.slice(0, 7);
+    if (targetEntries.length === 0 || isGeneratingDigest) return;
+
+    setIsGeneratingDigest(true);
+    setDigestError(null);
+
+    try {
+      const resp = await fetch('/api/reflect/weekly-digest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entries: targetEntries,
+          weekStart: weekInfo.weekStart,
+          weekEnd: weekInfo.weekEnd,
+          cognitivePatterns: cognitivePatterns || undefined
+        })
+      });
+
+      if (!resp.ok) {
+        const errJson = await resp.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Could not generate weekly digest.');
+      }
+
+      const data = await resp.json();
+      const newDigest: WeeklyDigest = {
+        id: weekInfo.weekId,
+        userId: currentUser?.uid || '',
+        weekStart: data.weekStart || weekInfo.weekStart,
+        weekEnd: data.weekEnd || weekInfo.weekEnd,
+        generatedAt: new Date().toISOString(),
+        sentAt: weeklyDigest?.sentAt || null,
+        recipientEmail: weeklyDigest?.recipientEmail || null,
+        entryCount: data.entryCount || targetEntries.length,
+        content: data.content
+      };
+
+      setWeeklyDigest(newDigest);
+
+      if (currentUser?.uid) {
+        await saveWeeklyDigest(currentUser.uid, weekInfo.weekId, newDigest);
+      }
+    } catch (e: any) {
+      console.error('Failed to generate weekly digest:', e);
+      setDigestError(e?.message || 'Failed to synthesize weekly digest. Please try again.');
+    } finally {
+      setIsGeneratingDigest(false);
+    }
+  };
+
+  // Send Digest Email via Gmail API route
+  const handleSendDigestEmail = async (recipientEmail?: string) => {
+    if (!weeklyDigest) throw new Error('No digest generated yet.');
+
+    const targetEmail = recipientEmail || currentUser?.email;
+    if (!targetEmail) throw new Error('No valid recipient email address.');
+
+    const resp = await fetch('/api/reflect/send-digest-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        digest: weeklyDigest,
+        recipientEmail: targetEmail,
+        userDisplayName: currentUser?.displayName
+      })
+    });
+
+    if (!resp.ok) {
+      const errJson = await resp.json().catch(() => ({}));
+      throw new Error(errJson.error || 'Failed to send digest email via Gmail API.');
+    }
+
+    const data = await resp.json();
+
+    const updatedDigest: WeeklyDigest = {
+      ...weeklyDigest,
+      sentAt: new Date().toISOString(),
+      recipientEmail: targetEmail
+    };
+
+    setWeeklyDigest(updatedDigest);
+
+    if (currentUser?.uid) {
+      await saveWeeklyDigest(currentUser.uid, weeklyDigest.id, updatedDigest);
+    }
+
+    return data;
+  };
+
+  // Reflection Canvas Handlers
   const handleStartNewReflection = (intent: ReflectionIntent = 'deep_reflection') => {
     const newId = 'entry_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
     const newEntry: JournalEntry = {
@@ -175,16 +428,16 @@ export default function App() {
       tags: []
     };
     setActiveEntry(newEntry);
-    setView('reflection');
+    setIsReflecting(true);
   };
 
   const handleSelectEntry = (entry: JournalEntry) => {
     setActiveEntry(entry);
-    setView('reflection');
+    setIsReflecting(true);
   };
 
   const handleCloseCanvas = () => {
-    setView('dashboard');
+    setIsReflecting(false);
     setActiveEntry(null);
     if (currentUser) {
       loadUserEntries(currentUser.uid);
@@ -214,30 +467,106 @@ export default function App() {
     );
   }
 
-  // 3. Authenticated User -> Either Dashboard or Reflection Canvas
-  return (
-    <div className="min-h-screen bg-stone-50 text-stone-900">
-      {view === 'dashboard' ? (
-        <Dashboard
-          user={currentUser}
-          entries={entries}
-          onNewReflection={handleStartNewReflection}
-          onSelectEntry={handleSelectEntry}
-          onDeleteEntry={handleDeleteEntry}
-          onSignOut={handleSignOut}
-          isLoading={entriesLoading}
+  // 3. Active Reflection Canvas Flow
+  if (isReflecting) {
+    return (
+      <div className="min-h-screen bg-stone-50 text-stone-900 p-2 sm:p-6 flex items-center justify-center">
+        <ReflectionCanvas
+          initialEntry={activeEntry}
+          userId={currentUser.uid}
+          onSaveEntry={handleSaveEntry}
+          onClose={handleCloseCanvas}
+          isSaving={isSavingEntry}
         />
-      ) : (
-        <div className="p-2 sm:p-6 min-h-screen flex items-center justify-center">
-          <ReflectionCanvas
-            initialEntry={activeEntry}
-            userId={currentUser.uid}
-            onSaveEntry={handleSaveEntry}
-            onClose={handleCloseCanvas}
-            isSaving={isSavingEntry}
-          />
-        </div>
-      )}
-    </div>
+      </div>
+    );
+  }
+
+  // 4. Authenticated Multi-Page Application Shell
+  return (
+    <AppLayout
+      currentPath={currentPath}
+      onNavigate={handleNavigate}
+      user={currentUser}
+      onSignOut={handleSignOut}
+      onNewReflection={handleStartNewReflection}
+      reflectionCount={entries.length}
+    >
+      {/* Route-Based Page Views */}
+      {(() => {
+        switch (currentPath) {
+          case '/reflections':
+            return (
+              <ReflectionsPage
+                entries={entries}
+                onNewReflection={handleStartNewReflection}
+                onSelectEntry={handleSelectEntry}
+                onDeleteEntry={handleDeleteEntry}
+                isLoading={entriesLoading}
+              />
+            );
+
+          case '/memory':
+            return (
+              <CognitiveMemoryPage
+                userId={currentUser.uid}
+                entries={entries}
+                patterns={cognitivePatterns}
+                onSynthesizePatterns={handleSynthesizePatterns}
+                isSynthesizing={isSynthesizingPatterns}
+                error={patternError}
+                onNewReflection={handleStartNewReflection}
+              />
+            );
+
+          case '/weekly-insights':
+            return (
+              <WeeklyInsightsPage
+                user={currentUser}
+                entries={entries}
+                weeklyDigest={weeklyDigest}
+                cognitivePatterns={cognitivePatterns}
+                onGenerateDigest={handleGenerateWeeklyDigest}
+                isGenerating={isGeneratingDigest}
+                error={digestError}
+                onNewReflection={handleStartNewReflection}
+                onSendDigestEmail={handleSendDigestEmail}
+              />
+            );
+
+          case '/calendar':
+            return (
+              <CalendarPlacesPage
+                entries={entries}
+                onNewReflection={handleStartNewReflection}
+                onSelectEntry={handleSelectEntry}
+              />
+            );
+
+          case '/settings':
+            return (
+              <SettingsPage
+                user={currentUser}
+                onSignOut={handleSignOut}
+              />
+            );
+
+          case '/dashboard':
+          default:
+            return (
+              <DashboardPage
+                user={currentUser}
+                entries={entries}
+                cognitivePatterns={cognitivePatterns}
+                weeklyDigest={weeklyDigest}
+                onNewReflection={handleStartNewReflection}
+                onSelectEntry={handleSelectEntry}
+                onDeleteEntry={handleDeleteEntry}
+                onNavigate={handleNavigate}
+              />
+            );
+        }
+      })()}
+    </AppLayout>
   );
 }

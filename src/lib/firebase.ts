@@ -112,6 +112,61 @@ export function subscribeToAuth(callback: (user: User | null) => void) {
   return () => unsubscribe();
 }
 
+export async function saveCognitivePatterns(userId: string, patterns: any) {
+  const { db } = await initFirebase();
+  const patternRef = doc(db, 'users', userId, 'patterns', 'latest');
+  const sanitized = sanitizePayload({
+    ...patterns,
+    userId,
+    updatedAt: new Date().toISOString()
+  });
+  await setDoc(patternRef, sanitized, { merge: true });
+  return sanitized;
+}
+
+export async function loadCognitivePatterns(userId: string) {
+  try {
+    const { db } = await initFirebase();
+    const patternRef = doc(db, 'users', userId, 'patterns', 'latest');
+    const snap = await getDoc(patternRef);
+    if (snap.exists()) {
+      return snap.data();
+    }
+    return null;
+  } catch (error) {
+    console.error('Failed to load cognitive patterns from Firestore:', error);
+    return null;
+  }
+}
+
+export async function saveWeeklyDigest(userId: string, weekId: string, digestData: any) {
+  const { db } = await initFirebase();
+  const digestRef = doc(db, 'users', userId, 'weeklyDigests', weekId);
+  const sanitized = sanitizePayload({
+    ...digestData,
+    id: weekId,
+    userId,
+    updatedAt: new Date().toISOString()
+  });
+  await setDoc(digestRef, sanitized, { merge: true });
+  return sanitized;
+}
+
+export async function loadWeeklyDigest(userId: string, weekId: string) {
+  try {
+    const { db } = await initFirebase();
+    const digestRef = doc(db, 'users', userId, 'weeklyDigests', weekId);
+    const snap = await getDoc(digestRef);
+    if (snap.exists()) {
+      return snap.data();
+    }
+    return null;
+  } catch (error) {
+    console.error('Failed to load weekly digest from Firestore:', error);
+    return null;
+  }
+}
+
 export { 
   collection, 
   doc, 
