@@ -2,29 +2,23 @@ import React, { useState } from 'react';
 import { 
   Calendar, 
   MapPin, 
-  ExternalLink, 
-  Clock, 
-  CheckCircle2, 
-  Sparkles, 
-  Plus, 
-  BookOpen, 
-  Navigation,
-  Check,
-  AlertCircle
+  Plus
 } from 'lucide-react';
 import { JournalEntry, CalendarAction, MapsAction, ReflectionIntent } from '../types';
-import { formatActionDateTime, createGoogleCalendarUrl, createGoogleMapsUrl } from '../lib/actionUtils';
+import { CalendarActionCard, MapsActionCard } from '../components/ActionCards';
 
 interface CalendarPlacesPageProps {
   entries: JournalEntry[];
   onNewReflection: (intent?: ReflectionIntent) => void;
   onSelectEntry: (entry: JournalEntry) => void;
+  onUpdateEntry?: (entry: JournalEntry) => Promise<void>;
 }
 
 export const CalendarPlacesPage: React.FC<CalendarPlacesPageProps> = ({
   entries,
   onNewReflection,
-  onSelectEntry
+  onSelectEntry,
+  onUpdateEntry
 }) => {
   const [filterType, setFilterType] = useState<'all' | 'calendar' | 'maps'>('all');
 
@@ -44,8 +38,35 @@ export const CalendarPlacesPage: React.FC<CalendarPlacesPageProps> = ({
     });
   });
 
-  const scheduledEvents = calendarItems.filter(item => item.action.status === 'created');
-  const suggestedEvents = calendarItems.filter(item => item.action.status !== 'created');
+  const handleUpdateCalendarAction = async (parentEntry: JournalEntry, updatedAction: CalendarAction) => {
+    if (!onUpdateEntry) return;
+
+    const updatedMessages = (parentEntry.messages || []).map(msg => {
+      if (!msg.actions) return msg;
+      const hasThisAction = msg.actions.some(act => act.id === updatedAction.id || (act.type === 'calendar' && (act as CalendarAction).title === updatedAction.title));
+      if (!hasThisAction) return msg;
+
+      const updatedActions = msg.actions.map(act => {
+        if (act.id === updatedAction.id || (act.type === 'calendar' && (act as CalendarAction).title === updatedAction.title)) {
+          return updatedAction;
+        }
+        return act;
+      });
+
+      return {
+        ...msg,
+        actions: updatedActions
+      };
+    });
+
+    const updatedEntry: JournalEntry = {
+      ...parentEntry,
+      messages: updatedMessages,
+      updatedAt: new Date().toISOString()
+    };
+
+    await onUpdateEntry(updatedEntry);
+  };
 
   return (
     <div id="calendar-places-page-container" className="space-y-6 animate-in fade-in duration-200">
@@ -138,67 +159,15 @@ export const CalendarPlacesPage: React.FC<CalendarPlacesPageProps> = ({
 
           {calendarItems.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-1">
-              {calendarItems.map(({ action, entry }, idx) => {
-                const calUrl = createGoogleCalendarUrl(action);
-                const isScheduled = action.status === 'created' || Boolean(action.googleEventLink);
-
-                return (
-                  <div
-                    key={action.id || idx}
-                    className="p-4 rounded-xl bg-amber-50/40 border border-amber-200/80 flex flex-col justify-between space-y-3"
-                  >
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-1.5">
-                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold ${
-                          isScheduled ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'
-                        }`}>
-                          {isScheduled ? 'Scheduled Event' : 'Suggested Action'}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => onSelectEntry(entry)}
-                          className="text-[10px] font-mono text-stone-400 hover:text-stone-800 underline truncate max-w-[120px]"
-                          title={`From reflection: ${entry.title}`}
-                        >
-                          From: {entry.title || 'Session'}
-                        </button>
-                      </div>
-
-                      <div>
-                        <h4 className="font-serif font-bold text-sm text-stone-900 leading-snug">
-                          {action.title}
-                        </h4>
-                        <p className="text-xs text-stone-600 font-mono mt-1">
-                          {formatActionDateTime(action)}
-                        </p>
-                        {action.location && (
-                          <p className="text-xs text-stone-500 flex items-center gap-1 mt-1">
-                            <MapPin className="w-3 h-3 text-stone-400 shrink-0" />
-                            <span className="truncate">{action.location}</span>
-                          </p>
-                        )}
-                        {action.description && (
-                          <p className="text-xs text-stone-600 line-clamp-2 mt-1.5 leading-relaxed">
-                            {action.description}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="pt-2 border-t border-amber-200/60 flex items-center justify-between">
-                      <a
-                        href={action.googleEventLink || calUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-amber-900 hover:underline"
-                      >
-                        <span>{isScheduled ? 'Open in Google Calendar' : 'Schedule Event'}</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                  </div>
-                );
-              })}
+              {calendarItems.map(({ action, entry }, idx) => (
+                <CalendarActionCard
+                  key={action.id || `cal_${entry.id}_${idx}`}
+                  action={action}
+                  parentEntry={entry}
+                  onSelectEntry={onSelectEntry}
+                  onUpdateAction={(updatedAct) => handleUpdateCalendarAction(entry, updatedAct)}
+                />
+              ))}
             </div>
           ) : (
             <div className="p-8 rounded-xl bg-stone-50/50 border border-dashed border-stone-200 text-center space-y-2">
@@ -233,55 +202,14 @@ export const CalendarPlacesPage: React.FC<CalendarPlacesPageProps> = ({
 
           {mapItems.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-1">
-              {mapItems.map(({ action, entry }, idx) => {
-                const mapsUrl = createGoogleMapsUrl(action);
-
-                return (
-                  <div
-                    key={action.id || idx}
-                    className="p-4 rounded-xl bg-stone-50 border border-stone-200 flex flex-col justify-between space-y-3"
-                  >
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-1.5">
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded font-semibold bg-stone-200/80 text-stone-800">
-                          Google Maps Location
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => onSelectEntry(entry)}
-                          className="text-[10px] font-mono text-stone-400 hover:text-stone-800 underline truncate max-w-[120px]"
-                          title={`From reflection: ${entry.title}`}
-                        >
-                          From: {entry.title || 'Session'}
-                        </button>
-                      </div>
-
-                      <div>
-                        <h4 className="font-serif font-bold text-sm text-stone-900 leading-snug">
-                          {action.placeName}
-                        </h4>
-                        {action.query && action.query !== action.placeName && (
-                          <p className="text-xs text-stone-500 line-clamp-2 mt-1 leading-relaxed">
-                            {action.query}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="pt-2 border-t border-stone-200 flex items-center justify-between">
-                      <a
-                        href={mapsUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-stone-900 hover:underline"
-                      >
-                        <span>Explore on Google Maps</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                  </div>
-                );
-              })}
+              {mapItems.map(({ action, entry }, idx) => (
+                <MapsActionCard
+                  key={action.id || `map_${entry.id}_${idx}`}
+                  action={action}
+                  parentEntry={entry}
+                  onSelectEntry={onSelectEntry}
+                />
+              ))}
             </div>
           ) : (
             <div className="p-8 rounded-xl bg-stone-50/50 border border-dashed border-stone-200 text-center space-y-2">

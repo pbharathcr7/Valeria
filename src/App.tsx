@@ -540,6 +540,7 @@ export default function App() {
                 entries={entries}
                 onNewReflection={handleStartNewReflection}
                 onSelectEntry={handleSelectEntry}
+                onUpdateEntry={handleSaveEntry}
               />
             );
 
