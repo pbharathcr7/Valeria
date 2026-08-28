@@ -85,10 +85,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSignIn, isLoading, e
         )}
 
         <div className="text-center max-w-3xl mx-auto space-y-6">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-stone-100 border border-stone-200 text-stone-700 text-xs font-medium">
-            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-            <span>Powered by Gemini 3.6 Flash & Cloud Firestore</span>
-          </div>
 
           <h1 className="font-serif text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-stone-900 leading-[1.15]">
             Your second brain for <span className="italic text-stone-600 font-normal">thinking</span>, not just writing.
@@ -181,7 +177,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSignIn, isLoading, e
 
       {/* Footer */}
       <footer className="border-t border-stone-200 py-6 text-center text-xs text-stone-500">
-        <p>MindMirror — Google AI Studio Developer Challenge 2026</p>
+        <p>MindMirror — Your Second Brain</p>
       </footer>
     </div>
   );
