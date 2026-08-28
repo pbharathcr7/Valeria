@@ -1,0 +1,69 @@
+{
+  "entities": {
+    "JournalEntry": {
+      "title": "JournalEntry",
+      "description": "A private multi-turn reflection session and Gemini dialogue",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique reflection document identifier"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Firebase UID of the owner"
+        },
+        "title": {
+          "type": "string",
+          "description": "Reflection title",
+          "maxLength": 200
+        },
+        "intent": {
+          "type": "string",
+          "description": "Locked reflection mode for this session",
+          "enum": [
+            "deep_reflection",
+            "brainstorm",
+            "summary",
+            "action_plan",
+            "cognitive_restructuring",
+            "gratitude"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation ISO timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last modified ISO timestamp"
+        },
+        "messages": {
+          "type": "array",
+          "description": "List of chat messages in the reflection"
+        },
+        "summary": {
+          "type": "string",
+          "description": "AI synthesized executive summary"
+        },
+        "insights": {
+          "type": "object",
+          "description": "Extracted cognitive insights and takeaways"
+        },
+        "tags": {
+          "type": "array",
+          "description": "Keywords and themes"
+        }
+      },
+      "required": ["id", "userId", "title", "intent", "createdAt", "updatedAt", "messages"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/interactions/{interactionId}": {
+      "schema": "JournalEntry",
+      "description": "User-isolated multi-turn cognitive reflections and Gemini dialogue interactions"
+    }
+  }
+}
