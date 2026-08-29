@@ -15,14 +15,27 @@ import {
   AlertCircle,
   Lock
 } from 'lucide-react';
-import { JournalEntry, ChatMessage, ReflectionIntent, CognitiveInsight, DetectedAction } from '../types';
+import { 
+  JournalEntry, 
+  ChatMessage, 
+  ReflectionIntent, 
+  CognitiveInsight, 
+  DetectedAction, 
+  CognitivePatternAnalysis, 
+  MemoryReference 
+} from '../types';
 import { ActionCards } from './ActionCards';
+import { RelatedMemoriesCard } from './RelatedMemoriesCard';
+import { retrieveRelevantMemories } from '../lib/memoryRetriever';
 
 interface ReflectionCanvasProps {
   initialEntry?: JournalEntry | null;
   userId: string;
+  allEntries?: JournalEntry[];
+  cognitivePatterns?: CognitivePatternAnalysis | null;
   onSaveEntry: (entry: JournalEntry) => Promise<void>;
   onClose: () => void;
+  onOpenEntryById?: (entryId: string) => void;
   isSaving: boolean;
 }
 
@@ -68,8 +81,11 @@ const INTENT_OPTIONS: { id: ReflectionIntent; label: string; icon: any; descript
 export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
   initialEntry,
   userId,
+  allEntries = [],
+  cognitivePatterns = null,
   onSaveEntry,
   onClose,
+  onOpenEntryById,
   isSaving: externalIsSaving
 }) => {
   const [entry, setEntry] = useState<JournalEntry>(() => {
@@ -104,6 +120,14 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
   useEffect(() => {
     entryRef.current = entry;
   }, [entry]);
+
+  // Synchronize state if initialEntry changes
+  useEffect(() => {
+    if (initialEntry) {
+      setEntry(initialEntry);
+      entryRef.current = initialEntry;
+    }
+  }, [initialEntry]);
 
   // Is the mode locked for this reflection session?
   const isModeLocked = entry.messages.length > 0;
@@ -192,13 +216,36 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
     // Immediate auto-save of the user message state in background
     triggerAutoSave(nextEntryState);
 
+    // Retrieve relevant previous memories for context injection
+    let memoryContextPayload: any = null;
+    let retrievedMemoriesForUI: MemoryReference[] = [];
+
+    try {
+      const memoryRetrievalResult = retrieveRelevantMemories({
+        currentMessage: content,
+        currentMessages: updatedMessages,
+        pastEntries: allEntries,
+        cognitivePatterns: cognitivePatterns,
+        currentEntryId: nextEntryState.id,
+        maxResults: 4
+      });
+
+      if (memoryRetrievalResult.relevantMemories.length > 0 || memoryRetrievalResult.cognitiveContext) {
+        memoryContextPayload = memoryRetrievalResult;
+        retrievedMemoriesForUI = memoryRetrievalResult.relevantMemories;
+      }
+    } catch (memErr) {
+      console.warn('Memory retrieval encountered a non-blocking issue, continuing without memory context:', memErr);
+    }
+
     try {
       const resp = await fetch('/api/reflect/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: updatedMessages,
-          intent: nextEntryState.intent
+          intent: nextEntryState.intent,
+          memoryContext: memoryContextPayload
         })
       });
 
@@ -213,6 +260,7 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
         role: 'model',
         content: data.content || "I've reflected on your thought.",
         actions: Array.isArray(data.actions) && data.actions.length > 0 ? data.actions : undefined,
+        memoryReferences: retrievedMemoriesForUI.length > 0 ? retrievedMemoriesForUI : undefined,
         timestamp: data.timestamp || new Date().toISOString()
       };
 
@@ -507,6 +555,15 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
                           actions={msg.actions} 
                           messageId={msg.id} 
                           onUpdateAction={(updatedAct) => handleUpdateAction(msg.id, updatedAct)} 
+                        />
+                      )}
+                      {msg.memoryReferences && msg.memoryReferences.length > 0 && (
+                        <RelatedMemoriesCard
+                          memoryReferences={msg.memoryReferences}
+                          onOpenMemory={onOpenEntryById ? (refId) => {
+                            triggerAutoSave(entry);
+                            onOpenEntryById(refId);
+                          } : undefined}
                         />
                       )}
                     </>

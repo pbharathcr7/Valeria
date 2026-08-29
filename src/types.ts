@@ -25,12 +25,22 @@ export interface MapsAction {
 
 export type DetectedAction = CalendarAction | MapsAction;
 
+export interface MemoryReference {
+  reflectionId: string;
+  title: string;
+  date: string;
+  excerpt: string;
+  reason?: string;
+  relevanceBadge?: 'Highly relevant' | 'Related';
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'model';
   content: string;
   timestamp: string; // ISO string
   actions?: DetectedAction[];
+  memoryReferences?: MemoryReference[];
 }
 
 export interface CognitiveInsight {
@@ -54,6 +64,7 @@ export interface JournalEntry {
   insights?: CognitiveInsight;
   tags?: string[];
   isFavorite?: boolean;
+  memoryReferences?: MemoryReference[];
 }
 
 export interface UserProfile {

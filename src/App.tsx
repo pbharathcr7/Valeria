@@ -472,10 +472,19 @@ export default function App() {
     return (
       <div className="min-h-screen bg-stone-50 text-stone-900 p-2 sm:p-6 flex items-center justify-center">
         <ReflectionCanvas
+          key={activeEntry?.id || 'new_reflection'}
           initialEntry={activeEntry}
           userId={currentUser.uid}
+          allEntries={entries}
+          cognitivePatterns={cognitivePatterns}
           onSaveEntry={handleSaveEntry}
           onClose={handleCloseCanvas}
+          onOpenEntryById={(entryId) => {
+            const target = entries.find(e => e.id === entryId);
+            if (target) {
+              setActiveEntry(target);
+            }
+          }}
           isSaving={isSavingEntry}
         />
       </div>
