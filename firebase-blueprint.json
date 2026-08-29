@@ -157,7 +157,15 @@
         },
         "content": {
           "type": "object",
-          "description": "Structured digest sections: weeklyOverview, biggestWin, biggestChallenge, growthInsight, nextWeekFocus"
+          "description": "Structured digest sections: weeklyOverview, biggestWin, biggestChallenge, growthInsight, nextWeekFocus, mindShare"
+        },
+        "weeklyInsights": {
+          "type": "object",
+          "description": "Weekly cognitive insights including AI Mind Share distribution"
+        },
+        "mindShare": {
+          "type": "object",
+          "description": "AI Mind Share distribution across synthesized cognitive themes"
         }
       },
       "required": ["id", "userId", "weekStart", "weekEnd", "generatedAt", "content"]

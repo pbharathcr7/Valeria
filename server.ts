@@ -466,7 +466,7 @@ Long-term Cognitive Patterns Context:
 `;
     }
 
-    const prompt = `You are MindMirror's Cognitive Synthesis Engine. Analyze the user's reflection entries from this current week (${weekStart || 'This Week'} to ${weekEnd || 'Today'}) and generate a structured Weekly Reflection Digest.
+    const prompt = `You are MindMirror's Cognitive Synthesis Engine. Analyze the user's reflection entries from this current week (${weekStart || 'This Week'} to ${weekEnd || 'Today'}) and generate a structured Weekly Reflection Digest including a comprehensive "Mind Share This Week" cognitive focus analysis.
 
 User's Weekly Reflections (${entries.length} sessions):
 """
@@ -474,7 +474,15 @@ ${reflectionSummaries}
 """
 ${memoryContext}
 
-Synthesize a high-impact, grounded, and encouraging weekly digest. Return strictly a JSON object conforming to this exact schema:
+Instructions for Cognitive Focus & Mind Share Analysis:
+1. Read all ${entries.length} reflections from this week.
+2. Cluster and merge similar reflections into 3 to 5 broader cognitive categories (e.g., "Career & Interviews", "Execution & Productivity", "Learning & Projects", "Personal Life & Wellbeing", "Relationships / Family", "Health", "Creativity", "Decision Making", etc. Determine the best 3-5 categories dynamically based on actual content).
+3. Count how many reflections belong to each theme (a reflection can contribute to one or more broader themes if relevant).
+4. Calculate the percentage distribution across these 3-5 synthesized themes. All theme percentages MUST strictly sum to 100.
+5. Provide the exact reflection titles from the input as "evidence" supporting each theme.
+6. Generate 1 concise insight sentence (1-2 sentences max) explaining why these themes dominated the week and how cognitive bandwidth was spent.
+
+Synthesize a high-impact, grounded, and encouraging weekly digest. Return strictly a valid JSON object conforming to this exact schema:
 {
   "weeklyOverview": "A thoughtful 2-3 sentence executive synthesis of their overarching mindset, primary emotional theme, and cognitive momentum across this week's reflections.",
   "biggestWin": "A specific, grounded breakthrough, productive reframing, positive outcome, or meaningful victory achieved during this week's reflections.",
@@ -482,7 +490,21 @@ Synthesize a high-impact, grounded, and encouraging weekly digest. Return strict
   "growthInsight": "A deep psychological or metacognitive insight highlighting their emotional resilience, mindset shift, or behavioral evolution over the week.",
   "nextWeekFocus": [
     "Clear, actionable focus area, prompt question, or intentional practice to carry into the upcoming week (provide 2 to 3 points)"
-  ]
+  ],
+  "mindShare": {
+    "themes": [
+      {
+        "theme": "Broader synthesized theme name (e.g., Career & Interviews)",
+        "count": 3,
+        "percentage": 50,
+        "evidence": [
+          "Exact Reflection Title 1",
+          "Exact Reflection Title 2"
+        ]
+      }
+    ],
+    "insight": "1-2 concise sentences summarizing where cognitive bandwidth was spent and why these themes dominated the week."
+  }
 }`;
 
     const result = await generateContentWithFallback({
@@ -504,7 +526,7 @@ Synthesize a high-impact, grounded, and encouraging weekly digest. Return strict
       }
     }
 
-    if (!structuredContent) {
+    if (!structuredContent || typeof structuredContent !== 'object') {
       structuredContent = {
         weeklyOverview: "You maintained consistent introspective practice this week, building clarity and emotional awareness across your reflections.",
         biggestWin: "Consistently identifying underlying emotions and engaging in constructive self-inquiry.",
@@ -517,7 +539,7 @@ Synthesize a high-impact, grounded, and encouraging weekly digest. Return strict
       };
     }
 
-    // Ensure array hygiene
+    // Ensure array hygiene for nextWeekFocus
     if (!Array.isArray(structuredContent.nextWeekFocus) || structuredContent.nextWeekFocus.length === 0) {
       structuredContent.nextWeekFocus = [
         "Anchor your mornings with intentional check-ins.",
@@ -525,8 +547,91 @@ Synthesize a high-impact, grounded, and encouraging weekly digest. Return strict
       ];
     }
 
+    // Process & Normalize MindShare
+    let mindShare = structuredContent.mindShare;
+    const nowIso = new Date().toISOString();
+
+    if (!mindShare || !Array.isArray(mindShare.themes) || mindShare.themes.length === 0) {
+      // Build robust fallback clustering from actual entries if LLM didn't return mindShare
+      const intentClusterMap: Record<string, { theme: string; titles: string[] }> = {
+        deep_reflection: { theme: 'Self-Inquiry & Growth', titles: [] },
+        cognitive_restructuring: { theme: 'Decision Making & Mindset', titles: [] },
+        action_plan: { theme: 'Execution & Productivity', titles: [] },
+        brainstorm: { theme: 'Creativity & Learning', titles: [] },
+        gratitude: { theme: 'Personal Wellbeing & Gratitude', titles: [] },
+        summary: { theme: 'Strategic Review & Clarity', titles: [] }
+      };
+
+      entries.forEach((e: any) => {
+        const intentKey = e.intent || 'deep_reflection';
+        const cluster = intentClusterMap[intentKey] || intentClusterMap['deep_reflection'];
+        cluster.titles.push(e.title || 'Untitled Reflection');
+      });
+
+      const rawClusters = Object.values(intentClusterMap)
+        .filter(c => c.titles.length > 0)
+        .slice(0, 5);
+
+      const totalClusteredCount = rawClusters.reduce((sum, c) => sum + c.titles.length, 0);
+
+      const fallbackThemes = rawClusters.map(c => ({
+        theme: c.theme,
+        count: c.titles.length,
+        percentage: totalClusteredCount > 0 ? Math.round((c.titles.length / totalClusteredCount) * 100) : 0,
+        evidence: c.titles
+      }));
+
+      mindShare = {
+        generatedAt: nowIso,
+        themes: fallbackThemes,
+        insight: `Cognitive attention this week was distributed across ${fallbackThemes.map(t => t.theme.toLowerCase()).join(', ')} with consistent reflective engagement.`
+      };
+    } else {
+      // Validate and clean up AI-generated themes
+      mindShare.generatedAt = mindShare.generatedAt || nowIso;
+      mindShare.themes = mindShare.themes.slice(0, 5).map((t: any) => {
+        const themeTitle = typeof t.theme === 'string' && t.theme.trim() ? t.theme.trim() : 'Cognitive Exploration';
+        const count = typeof t.count === 'number' && t.count > 0 ? Math.round(t.count) : (Array.isArray(t.evidence) && t.evidence.length > 0 ? t.evidence.length : 1);
+        const percentage = typeof t.percentage === 'number' && t.percentage >= 0 ? Math.round(t.percentage) : 0;
+        const evidence = Array.isArray(t.evidence) 
+          ? t.evidence.filter((ev: any) => typeof ev === 'string' && ev.trim().length > 0)
+          : [];
+
+        return {
+          theme: themeTitle,
+          count,
+          percentage,
+          evidence
+        };
+      });
+
+      // Ensure percentages sum to 100%
+      const totalPct = mindShare.themes.reduce((sum: number, t: any) => sum + t.percentage, 0);
+      if (totalPct !== 100 && mindShare.themes.length > 0) {
+        if (totalPct === 0) {
+          const equalShare = Math.floor(100 / mindShare.themes.length);
+          mindShare.themes.forEach((t: any) => { t.percentage = equalShare; });
+          mindShare.themes[0].percentage += (100 - (equalShare * mindShare.themes.length));
+        } else {
+          // Adjust the difference on the first/largest theme
+          const diff = 100 - totalPct;
+          mindShare.themes[0].percentage += diff;
+        }
+      }
+
+      if (!mindShare.insight || typeof mindShare.insight !== 'string') {
+        mindShare.insight = `Cognitive attention centered primarily on ${mindShare.themes[0]?.theme || 'core priorities'}, reflecting intentional focus across the week.`;
+      }
+    }
+
+    structuredContent.mindShare = mindShare;
+
     return res.json({
       content: structuredContent,
+      weeklyInsights: {
+        mindShare
+      },
+      mindShare,
       weekStart: weekStart || new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0],
       weekEnd: weekEnd || new Date().toISOString().split('T')[0],
       entryCount: entries.length,

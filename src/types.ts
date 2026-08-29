@@ -90,12 +90,26 @@ export interface CognitivePatternAnalysis {
   rawAnalysis?: string;
 }
 
+export interface MindShareTheme {
+  theme: string;
+  count: number;
+  percentage: number;
+  evidence: string[];
+}
+
+export interface MindShareAnalysis {
+  generatedAt?: string;
+  themes: MindShareTheme[];
+  insight: string;
+}
+
 export interface WeeklyDigestContent {
   weeklyOverview: string;
   biggestWin: string;
   biggestChallenge: string;
   growthInsight: string;
   nextWeekFocus: string[];
+  mindShare?: MindShareAnalysis;
 }
 
 export interface WeeklyDigest {
@@ -108,5 +122,9 @@ export interface WeeklyDigest {
   recipientEmail?: string | null;
   entryCount: number;
   content: WeeklyDigestContent;
+  weeklyInsights?: {
+    mindShare?: MindShareAnalysis;
+  };
+  mindShare?: MindShareAnalysis;
 }
 

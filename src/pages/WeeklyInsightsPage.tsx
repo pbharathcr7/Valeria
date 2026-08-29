@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { WeeklyDigest, JournalEntry, UserProfile, CognitivePatternAnalysis, ReflectionIntent } from '../types';
 import { WeeklyDigestModal } from '../components/WeeklyDigestModal';
+import { WeeklyVisualAnalytics } from '../components/WeeklyVisualAnalytics';
+import { getWeekBounds, formatLocalDate } from '../lib/dateUtils';
 
 interface WeeklyInsightsPageProps {
   user: UserProfile;
@@ -44,26 +46,14 @@ export const WeeklyInsightsPage: React.FC<WeeklyInsightsPageProps> = ({
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [emailStatus, setEmailStatus] = useState<{ success: boolean; message: string } | null>(null);
 
-  // Calculate current week bounds
-  const now = new Date();
-  const dayOfWeek = now.getDay(); // 0 is Sunday
-  const distanceToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + distanceToMonday);
-  monday.setHours(0, 0, 0, 0);
+  // Calculate current week bounds in strict local calendar time
+  const { monday, sunday, weekStart: weekStartStr, weekEnd: weekEndStr } = getWeekBounds();
 
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  sunday.setHours(23, 59, 59, 999);
-
-  const weekStartStr = monday.toISOString().split('T')[0];
-  const weekEndStr = sunday.toISOString().split('T')[0];
-
-  // Current week entries
+  // Current week entries matching the 7 calendar days
   const currentWeekEntries = entries.filter(e => {
     if (!e.createdAt) return false;
-    const entryDate = new Date(e.createdAt);
-    return entryDate >= monday && entryDate <= sunday;
+    const entryDateStr = formatLocalDate(new Date(e.createdAt));
+    return entryDateStr >= weekStartStr && entryDateStr <= weekEndStr;
   });
 
   const handleSendEmail = async () => {
@@ -156,7 +146,16 @@ export const WeeklyInsightsPage: React.FC<WeeklyInsightsPageProps> = ({
         </div>
       )}
 
-      {/* 2. Main Weekly Digest View */}
+      {/* 2. Visual Analytics Summary Layer */}
+      <WeeklyVisualAnalytics
+        entries={entries}
+        weeklyDigest={weeklyDigest}
+        weekStart={weekStartStr}
+        weekEnd={weekEndStr}
+        isLoading={isGenerating}
+      />
+
+      {/* 3. Main Weekly Digest View */}
       {weeklyDigest ? (
         <div className="space-y-6">
           <div className="p-6 rounded-2xl bg-white border border-stone-200 shadow-xs space-y-6">

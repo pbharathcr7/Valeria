@@ -34,6 +34,7 @@ import {
   WeeklyDigest 
 } from './types';
 import { User } from 'firebase/auth';
+import { getWeekBounds, formatLocalDate } from './lib/dateUtils';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
@@ -95,35 +96,9 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Helper for current week ID calculation
+  // Helper for current week ID calculation using local calendar time
   const getCurrentWeekInfo = () => {
-    const now = new Date();
-    const dayOfWeek = now.getDay();
-    const distanceToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-    const monday = new Date(now);
-    monday.setDate(now.getDate() + distanceToMonday);
-    monday.setHours(0, 0, 0, 0);
-
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    sunday.setHours(23, 59, 59, 999);
-
-    const weekStartStr = monday.toISOString().split('T')[0];
-    const weekEndStr = sunday.toISOString().split('T')[0];
-
-    // Compute ISO Week number
-    const target = new Date(monday.valueOf());
-    const dayNr = (monday.getDay() + 6) % 7;
-    target.setDate(target.getDate() - dayNr + 3);
-    const firstThursday = target.valueOf();
-    target.setMonth(0, 1);
-    if (target.getDay() !== 4) {
-      target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
-    }
-    const weekNum = 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000);
-    const weekId = `${monday.getFullYear()}-W${String(weekNum).padStart(2, '0')}`;
-
-    return { weekStart: weekStartStr, weekEnd: weekEndStr, weekId, monday, sunday };
+    return getWeekBounds();
   };
 
   // Subscribe to Firebase Auth
@@ -322,8 +297,8 @@ export default function App() {
     const weekInfo = getCurrentWeekInfo();
     const currentWeekEntries = entries.filter(e => {
       if (!e.createdAt) return false;
-      const entryDate = new Date(e.createdAt);
-      return entryDate >= weekInfo.monday && entryDate <= weekInfo.sunday;
+      const entryLocalDate = formatLocalDate(new Date(e.createdAt));
+      return entryLocalDate >= weekInfo.weekStart && entryLocalDate <= weekInfo.weekEnd;
     });
 
     const targetEntries = currentWeekEntries.length > 0 ? currentWeekEntries : entries.slice(0, 7);
@@ -350,6 +325,7 @@ export default function App() {
       }
 
       const data = await resp.json();
+      const mindShareData = data.mindShare || data.content?.mindShare;
       const newDigest: WeeklyDigest = {
         id: weekInfo.weekId,
         userId: currentUser?.uid || '',
@@ -359,7 +335,14 @@ export default function App() {
         sentAt: weeklyDigest?.sentAt || null,
         recipientEmail: weeklyDigest?.recipientEmail || null,
         entryCount: data.entryCount || targetEntries.length,
-        content: data.content
+        content: {
+          ...data.content,
+          mindShare: mindShareData
+        },
+        weeklyInsights: {
+          mindShare: mindShareData
+        },
+        mindShare: mindShareData
       };
 
       setWeeklyDigest(newDigest);
