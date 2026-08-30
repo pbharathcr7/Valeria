@@ -25,6 +25,8 @@ import { CognitiveMemoryPage } from './pages/CognitiveMemoryPage';
 import { WeeklyInsightsPage } from './pages/WeeklyInsightsPage';
 import { CalendarPlacesPage } from './pages/CalendarPlacesPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { DocumentsPage } from './pages/DocumentsPage';
+import { LivePage } from './pages/LivePage';
 import { ReflectionCanvas } from './components/ReflectionCanvas';
 import { 
   UserProfile, 
@@ -62,7 +64,7 @@ export default function App() {
   // Multi-page navigation state
   const getInitialPath = (): string => {
     const path = window.location.pathname;
-    const validPaths = ['/dashboard', '/reflections', '/memory', '/weekly-insights', '/calendar', '/settings'];
+    const validPaths = ['/dashboard', '/reflections', '/memory', '/weekly-insights', '/live', '/documents', '/calendar', '/settings'];
     if (validPaths.includes(path)) {
       return path;
     }
@@ -75,7 +77,7 @@ export default function App() {
   useEffect(() => {
     const handlePopState = () => {
       const path = window.location.pathname;
-      const validPaths = ['/dashboard', '/reflections', '/memory', '/weekly-insights', '/calendar', '/settings'];
+      const validPaths = ['/dashboard', '/reflections', '/memory', '/weekly-insights', '/live', '/documents', '/calendar', '/settings'];
       if (validPaths.includes(path)) {
         setCurrentPath(path);
       } else {
@@ -523,6 +525,22 @@ export default function App() {
                 error={digestError}
                 onNewReflection={handleStartNewReflection}
                 onSendDigestEmail={handleSendDigestEmail}
+              />
+            );
+
+          case '/live':
+            return (
+              <LivePage
+                user={currentUser}
+                onNavigate={handleNavigate}
+              />
+            );
+
+          case '/documents':
+            return (
+              <DocumentsPage
+                user={currentUser}
+                onNewReflection={handleStartNewReflection}
               />
             );
 

@@ -169,6 +169,104 @@
         }
       },
       "required": ["id", "userId", "weekStart", "weekEnd", "generatedAt", "content"]
+    },
+    "DocumentItem": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique document ID"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user UID"
+        },
+        "fileName": {
+          "type": "string",
+          "description": "Name of the uploaded PDF file"
+        },
+        "fileSize": {
+          "type": "number",
+          "description": "File size in bytes"
+        },
+        "pageCount": {
+          "type": "number",
+          "description": "Total number of pages in the PDF"
+        },
+        "uploadedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when document was uploaded"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["uploading", "processing", "indexed", "failed"],
+          "description": "Current processing/indexing status"
+        },
+        "storagePath": {
+          "type": "string",
+          "description": "Firestore storage path reference"
+        },
+        "chunkCount": {
+          "type": "number",
+          "description": "Number of text chunks created for vector retrieval"
+        },
+        "errorMessage": {
+          "type": "string",
+          "description": "Error details if processing failed"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["id", "userId", "fileName", "fileSize", "uploadedAt", "status", "createdAt", "updatedAt"]
+    },
+    "DocumentChunk": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique chunk identifier"
+        },
+        "documentId": {
+          "type": "string",
+          "description": "Parent document identifier"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user UID"
+        },
+        "text": {
+          "type": "string",
+          "description": "Extracted text segment from the PDF"
+        },
+        "pageNumber": {
+          "type": "number",
+          "description": "Page number where this chunk was found in the PDF"
+        },
+        "chunkIndex": {
+          "type": "number",
+          "description": "Order index of chunk within document"
+        },
+        "embedding": {
+          "type": "array",
+          "items": { "type": "number" },
+          "description": "Vector embedding coordinates for semantic retrieval"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Chunk creation timestamp"
+        }
+      },
+      "required": ["id", "documentId", "userId", "text", "pageNumber", "chunkIndex", "createdAt"]
     }
   },
   "firestore": {
@@ -183,6 +281,14 @@
     "/users/{userId}/weeklyDigests/{weekId}": {
       "schema": "WeeklyDigest",
       "description": "User-isolated weekly cognitive summaries and email dispatch records"
+    },
+    "/users/{userId}/documents/{documentId}": {
+      "schema": "DocumentItem",
+      "description": "User-isolated PDF document metadata"
+    },
+    "/users/{userId}/documents/{documentId}/chunks/{chunkId}": {
+      "schema": "DocumentChunk",
+      "description": "User-isolated PDF text chunk and vector embeddings"
     }
   }
 }

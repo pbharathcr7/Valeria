@@ -167,6 +167,131 @@ export async function loadWeeklyDigest(userId: string, weekId: string) {
   }
 }
 
+// -------------------------------------------------------------
+// Document Intelligence Firestore Helpers
+// -------------------------------------------------------------
+
+export async function loadUserDocuments(userId: string) {
+  try {
+    const { db } = await initFirebase();
+    const docsRef = collection(db, 'users', userId, 'documents');
+    const q = query(docsRef, orderBy('createdAt', 'desc'));
+    const snapshot = await getDocs(q);
+
+    const documents: any[] = [];
+    snapshot.forEach((snap) => {
+      documents.push({ ...snap.data(), id: snap.id });
+    });
+    return documents;
+  } catch (error) {
+    console.error('Failed to load documents from Firestore:', error);
+    return [];
+  }
+}
+
+export async function saveDocument(userId: string, documentId: string, docData: any) {
+  const { db } = await initFirebase();
+  const docRef = doc(db, 'users', userId, 'documents', documentId);
+  const sanitized = sanitizePayload({
+    ...docData,
+    id: documentId,
+    userId,
+    updatedAt: new Date().toISOString()
+  });
+  await setDoc(docRef, sanitized, { merge: true });
+  return sanitized;
+}
+
+export async function saveDocumentChunks(userId: string, documentId: string, chunks: any[]) {
+  const { db } = await initFirebase();
+  for (const chunk of chunks) {
+    const chunkId = `chunk_${chunk.chunkIndex}`;
+    const chunkRef = doc(db, 'users', userId, 'documents', documentId, 'chunks', chunkId);
+    const sanitized = sanitizePayload({
+      ...chunk,
+      id: chunkId,
+      documentId,
+      userId,
+      createdAt: chunk.createdAt || new Date().toISOString()
+    });
+    await setDoc(chunkRef, sanitized, { merge: true });
+  }
+}
+
+export async function loadDocumentChunks(userId: string, documentId: string) {
+  try {
+    const { db } = await initFirebase();
+    const chunksRef = collection(db, 'users', userId, 'documents', documentId, 'chunks');
+    const snapshot = await getDocs(chunksRef);
+    const chunks: any[] = [];
+    snapshot.forEach((snap) => {
+      chunks.push({ ...snap.data(), id: snap.id });
+    });
+    return chunks.sort((a, b) => (a.chunkIndex || 0) - (b.chunkIndex || 0));
+  } catch (error) {
+    console.error('Failed to load document chunks from Firestore:', error);
+    return [];
+  }
+}
+
+export async function loadDocumentConversations(userId: string, documentId: string) {
+  try {
+    const { db } = await initFirebase();
+    const convRef = collection(db, 'users', userId, 'documents', documentId, 'conversations');
+    const q = query(convRef, orderBy('timestamp', 'asc'));
+    const snapshot = await getDocs(q);
+    const messages: any[] = [];
+    snapshot.forEach((snap) => {
+      messages.push({ ...snap.data(), id: snap.id });
+    });
+    return messages;
+  } catch (error) {
+    console.error('Failed to load document conversations from Firestore:', error);
+    return [];
+  }
+}
+
+export async function saveDocumentChatMessage(userId: string, documentId: string, messageData: any) {
+  const { db } = await initFirebase();
+  const messageId = messageData.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const messageRef = doc(db, 'users', userId, 'documents', documentId, 'conversations', messageId);
+  const sanitized = sanitizePayload({
+    ...messageData,
+    id: messageId,
+    timestamp: messageData.timestamp || new Date().toISOString()
+  });
+  await setDoc(messageRef, sanitized, { merge: true });
+  return sanitized;
+}
+
+export async function deleteUserDocument(userId: string, documentId: string) {
+  const { db } = await initFirebase();
+  
+  // 1. Delete all subcollection chunk documents
+  try {
+    const chunksRef = collection(db, 'users', userId, 'documents', documentId, 'chunks');
+    const chunksSnap = await getDocs(chunksRef);
+    const deletePromises = chunksSnap.docs.map((cSnap) => deleteDoc(cSnap.ref));
+    await Promise.all(deletePromises);
+  } catch (chunkErr) {
+    console.warn('Error deleting document chunks:', chunkErr);
+  }
+
+  // 2. Delete all conversation history documents
+  try {
+    const convRef = collection(db, 'users', userId, 'documents', documentId, 'conversations');
+    const convSnap = await getDocs(convRef);
+    const deleteConvPromises = convSnap.docs.map((cSnap) => deleteDoc(cSnap.ref));
+    await Promise.all(deleteConvPromises);
+  } catch (convErr) {
+    console.warn('Error deleting document conversations:', convErr);
+  }
+
+  // 3. Delete parent document record
+  const docRef = doc(db, 'users', userId, 'documents', documentId);
+  await deleteDoc(docRef);
+}
+
 export { 
   collection, 
   doc, 

@@ -9,8 +9,10 @@ import {
   Settings, 
   Plus, 
   LogOut, 
-  X,
-  Sparkles
+  X, 
+  Sparkles, 
+  FileText,
+  Radio
 } from 'lucide-react';
 import { UserProfile, ReflectionIntent } from '../types';
 
@@ -66,6 +68,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Weekly Insights',
       icon: Mail,
       badge: 'New'
+    },
+    {
+      path: '/live',
+      label: 'MindMirror Live',
+      icon: Radio,
+      badge: 'LIVE'
+    },
+    {
+      path: '/documents',
+      label: 'Documents',
+      icon: FileText,
+      badge: null
     },
     {
       path: '/calendar',

@@ -128,3 +128,54 @@ export interface WeeklyDigest {
   mindShare?: MindShareAnalysis;
 }
 
+export type DocumentStatus = 'uploading' | 'processing' | 'indexed' | 'failed';
+
+export interface DocumentItem {
+  id: string;
+  userId: string;
+  fileName: string;
+  fileSize: number;
+  pageCount?: number;
+  uploadedAt: string;
+  status: DocumentStatus;
+  storagePath?: string;
+  chunkCount?: number;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DocumentChunk {
+  id: string;
+  documentId: string;
+  userId: string;
+  text: string;
+  pageNumber: number;
+  chunkIndex: number;
+  embedding?: number[];
+  createdAt: string;
+}
+
+export interface DocumentChatMessage {
+  id: string;
+  role: 'user' | 'model';
+  message: string;
+  timestamp: string;
+  citedPages?: number[];
+  retrievedChunkCount?: number;
+  evidence?: string[];
+}
+
+export type LiveConnectionState = 'idle' | 'connecting' | 'connected' | 'listening' | 'speaking' | 'interrupted' | 'error';
+
+export type LiveVoiceName = 'Zephyr' | 'Aoede' | 'Kore' | 'Puck' | 'Charon' | 'Fenrir';
+
+export interface LiveTranscriptItem {
+  id: string;
+  role: 'user' | 'model';
+  text: string;
+  timestamp: string;
+  isInterrupted?: boolean;
+}
+
+
