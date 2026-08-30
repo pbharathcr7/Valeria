@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Mic, 
   MicOff, 
   Volume2, 
   VolumeX, 
   Radio, 
-  Hand, 
   Sparkles, 
   RotateCcw, 
   Power, 
@@ -16,34 +15,134 @@ import {
   Check,
   Clock,
   Copy,
-  Download,
-  Flame,
-  Feather
+  FileText,
+  Brain,
+  Calendar,
+  BookmarkPlus,
+  ArrowRight,
+  ShieldCheck,
+  Layers,
+  Compass,
+  ChevronRight,
+  RefreshCw,
+  Sliders,
+  CheckCircle2,
+  FileSearch,
+  User,
+  Bot
 } from 'lucide-react';
-import { UserProfile, LiveConnectionState, LiveVoiceName, LiveTranscriptItem } from '../types';
+import { 
+  UserProfile, 
+  JournalEntry, 
+  CognitivePatternAnalysis, 
+  LiveConnectionState, 
+  LiveVoiceName, 
+  LiveTranscriptItem, 
+  DocumentItem,
+  DocumentChunk,
+  ReflectionIntent
+} from '../types';
+import { 
+  initFirebase, 
+  collection, 
+  doc, 
+  setDoc, 
+  sanitizePayload, 
+  loadUserDocuments,
+  loadDocumentChunks 
+} from '../lib/firebase';
 
 interface LivePageProps {
   user: UserProfile;
+  entries?: JournalEntry[];
+  cognitivePatterns?: CognitivePatternAnalysis | null;
+  initialDocId?: string | null;
   onNavigate?: (path: string) => void;
+  onNewReflection?: (intent?: ReflectionIntent) => void;
+  onRefreshEntries?: () => void;
 }
 
-const AVAILABLE_VOICES: { name: LiveVoiceName; label: string; tone: string; desc: string }[] = [
-  { name: 'Zephyr', label: 'Zephyr', tone: 'Calm & Mindful', desc: 'Soothing, gentle pacing, ideal for deep self-reflection' },
-  { name: 'Aoede', label: 'Aoede', tone: 'Warm & Empathetic', desc: 'Heartfelt, emotionally attuned, active listener' },
-  { name: 'Kore', label: 'Kore', tone: 'Grounded & Serene', desc: 'Balanced clarity, meditative presence, grounding cadence' },
-  { name: 'Puck', label: 'Puck', tone: 'Engaging & Dynamic', desc: 'Upbeat curiosity, insightful questioning, energetic' },
-  { name: 'Charon', label: 'Charon', tone: 'Deep & Resonant', desc: 'Steady anchor, rich low timbre, philosophical depth' },
-  { name: 'Fenrir', label: 'Fenrir', tone: 'Direct & Crisp', desc: 'Articulate clarity, structured thoughts, focused' }
+const AVAILABLE_VOICES: { name: LiveVoiceName; label: string; tone: string; desc: string; vibe: string }[] = [
+  { 
+    name: 'Zephyr', 
+    label: 'Zephyr', 
+    tone: 'Calm & Mindful', 
+    desc: 'Soothing cadence and reflective tone, ideal for deep introspection and grounding.',
+    vibe: 'Reflective • Balanced'
+  },
+  { 
+    name: 'Aoede', 
+    label: 'Aoede', 
+    tone: 'Warm & Empathetic', 
+    desc: 'Heartfelt, emotionally attuned active listener with high warmth.',
+    vibe: 'Empathetic • Attuned'
+  },
+  { 
+    name: 'Kore', 
+    label: 'Kore', 
+    tone: 'Grounded & Serene', 
+    desc: 'Serene clarity and grounded presence for organizing complex thoughts.',
+    vibe: 'Clarity • Grounding'
+  },
+  { 
+    name: 'Puck', 
+    label: 'Puck', 
+    tone: 'Engaging & Inquisitive', 
+    desc: 'Dynamic curiosity and sharp questioning to challenge assumptions.',
+    vibe: 'Inquisitive • Dynamic'
+  },
+  { 
+    name: 'Charon', 
+    label: 'Charon', 
+    tone: 'Deep & Resonant', 
+    desc: 'Low, steady timbre with philosophical gravitas for heavy decisions.',
+    vibe: 'Resonant • Philosophical'
+  },
+  { 
+    name: 'Fenrir', 
+    label: 'Fenrir', 
+    tone: 'Direct & Crisp', 
+    desc: 'Crisp, structured thoughts for execution and cutting through hesitation.',
+    vibe: 'Direct • Structured'
+  }
 ];
 
-const REFLECTION_PROMPTS = [
-  { label: 'Unpack My Day', prompt: 'I want to reflect on how my day went and clear my mental clutter.' },
-  { label: 'Decision Clarity', prompt: 'Help me think through a tough choice I have been deliberating.' },
-  { label: 'Mindful Breathing', prompt: 'Guide me through a brief, calming pause to center my energy.' },
-  { label: 'Reframe a Frustration', prompt: 'I experienced some friction earlier and want a fresh perspective.' }
+const INQUIRY_STARTERS = [
+  {
+    category: 'Daily Mindful Clear',
+    title: 'Unpack Mental Clutter',
+    prompt: 'I want to unpack how my day went and clarify the thoughts occupying my headspace right now.',
+    icon: Compass
+  },
+  {
+    category: 'Decision Intelligence',
+    title: 'Evaluate a Crossroads',
+    prompt: 'I am facing a decision with conflicting priorities. Help me stress-test my reasoning objectively.',
+    icon: Layers
+  },
+  {
+    category: 'Workspace & Documents',
+    title: 'Synthesize Document Insights',
+    prompt: 'Let us discuss the core ideas and implications from the documents in my workspace.',
+    icon: FileText
+  },
+  {
+    category: 'Cognitive Reframing',
+    title: 'Reframe a Friction Point',
+    prompt: 'I experienced some situational frustration earlier. Help me inspect the root cause and reframe it constructively.',
+    icon: Brain
+  }
 ];
 
-export const LivePage: React.FC<LivePageProps> = ({ user }) => {
+export const LivePage: React.FC<LivePageProps> = ({
+  user,
+  entries = [],
+  cognitivePatterns = null,
+  initialDocId = null,
+  onNavigate,
+  onNewReflection,
+  onRefreshEntries
+}) => {
   // Session & Connection State
   const [state, setState] = useState<LiveConnectionState>('idle');
   const [isMuted, setIsMuted] = useState<boolean>(false);
@@ -55,17 +154,40 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
   // Session duration timer
   const [sessionDurationSeconds, setSessionDurationSeconds] = useState<number>(0);
 
-  // Transcripts & Conversation State
-  const [transcriptHistory, setTranscriptHistory] = useState<LiveTranscriptItem[]>([]);
-  const [currentInterimUserText, setCurrentInterimUserText] = useState<string>('');
-  const [currentStreamingModelText, setCurrentStreamingModelText] = useState<string>('');
-  const [showTranscriptDrawer, setShowTranscriptDrawer] = useState<boolean>(false);
+  // Live Dialogue Stream (Permanent turn history + active streaming turn)
+  const [dialogueItems, setDialogueItems] = useState<LiveTranscriptItem[]>([]);
+  const [activeUserLiveText, setActiveUserLiveText] = useState<string>('');
+  const [activeModelLiveText, setActiveModelLiveText] = useState<string>('');
+  const [lastCompletedUtterance, setLastCompletedUtterance] = useState<{ role: 'user' | 'model'; text: string } | null>(null);
+
+  // Workspace Documents state for live grounding
+  const [userDocuments, setUserDocuments] = useState<DocumentItem[]>([]);
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(initialDocId || null);
+  const [selectedDocChunks, setSelectedDocChunks] = useState<DocumentChunk[]>([]);
+  const [docsLoading, setDocsLoading] = useState<boolean>(false);
+
+  // Synchronize initialDocId when passed from props
+  useEffect(() => {
+    if (initialDocId) {
+      setSelectedDocId(initialDocId);
+    }
+  }, [initialDocId]);
+
+  // Derive active document object
+  const activeDoc = useMemo(() => {
+    return userDocuments.find((d) => d.id === selectedDocId) || null;
+  }, [userDocuments, selectedDocId]);
+
+  // Live extracted action items / takeaways during session
+  const [extractedTakeaways, setExtractedTakeaways] = useState<string[]>([]);
+  const [isSavingJournal, setIsSavingJournal] = useState<boolean>(false);
+  const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
   const [copiedTranscript, setCopiedTranscript] = useState<boolean>(false);
 
-  // Audio Visualization Spectrum Levels (Array of 16 bars)
-  const [spectrumBars, setSpectrumBars] = useState<number[]>(new Array(16).fill(0.08));
+  // Audio Levels & Visualizer state
   const [micVolume, setMicVolume] = useState<number>(0);
   const [playbackVolume, setPlaybackVolume] = useState<number>(0);
+  const [waveFrequencies, setWaveFrequencies] = useState<number[]>([0.15, 0.25, 0.4, 0.6, 0.4, 0.25, 0.15]);
 
   // Audio & WebSocket Refs
   const wsRef = useRef<WebSocket | null>(null);
@@ -85,9 +207,9 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
   const isSessionActiveRef = useRef<boolean>(false);
   const animationFrameRef = useRef<number | null>(null);
   const timerIntervalRef = useRef<any>(null);
-  const transcriptBottomRef = useRef<HTMLDivElement | null>(null);
+  const dialogueEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Keep ref flags synced
+  // Synchronize ref states
   useEffect(() => {
     isMutedRef.current = isMuted;
   }, [isMuted]);
@@ -99,11 +221,49 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
     }
   }, [isSpeakerMuted]);
 
+  // Load user workspace documents for cognitive grounding
+  useEffect(() => {
+    if (user && user.uid) {
+      setDocsLoading(true);
+      const urlParams = new URLSearchParams(window.location.search);
+      const targetDocId = initialDocId || urlParams.get('docId');
+
+      loadUserDocuments(user.uid)
+        .then((docs) => {
+          const docList = docs as DocumentItem[];
+          setUserDocuments(docList);
+          if (targetDocId && docList.some(d => d.id === targetDocId)) {
+            setSelectedDocId(targetDocId);
+          } else if (docList.length > 0 && !selectedDocId && !targetDocId) {
+            setSelectedDocId(docList[0].id);
+          }
+        })
+        .catch((err) => console.warn('Could not load user documents for live grounding:', err))
+        .finally(() => setDocsLoading(false));
+    }
+  }, [user, initialDocId]);
+
+  // Load active document chunks whenever selectedDocId changes
+  useEffect(() => {
+    if (user?.uid && selectedDocId) {
+      loadDocumentChunks(user.uid, selectedDocId)
+        .then((chunks) => {
+          setSelectedDocChunks(chunks as DocumentChunk[]);
+        })
+        .catch((err) => {
+          console.warn('Could not load chunks for selected document:', err);
+          setSelectedDocChunks([]);
+        });
+    } else {
+      setSelectedDocChunks([]);
+    }
+  }, [user?.uid, selectedDocId]);
+
   // Session duration timer loop
   useEffect(() => {
     if (state !== 'idle' && state !== 'error') {
       timerIntervalRef.current = setInterval(() => {
-        setSessionDurationSeconds(prev => prev + 1);
+        setSessionDurationSeconds((prev) => prev + 1);
       }, 1000);
     } else {
       if (timerIntervalRef.current) {
@@ -118,14 +278,14 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
     };
   }, [state]);
 
-  // Auto-scroll transcript
+  // Auto-scroll live dialogue stream
   useEffect(() => {
-    if (transcriptBottomRef.current) {
-      transcriptBottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (dialogueEndRef.current) {
+      dialogueEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [transcriptHistory, currentInterimUserText, currentStreamingModelText]);
+  }, [dialogueItems, activeUserLiveText, activeModelLiveText]);
 
-  // Cleanup on unmount
+  // Cleanup on component unmount
   useEffect(() => {
     return () => {
       endLiveSession();
@@ -135,11 +295,65 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
     };
   }, []);
 
-  // Visualizer loop for model playback volume & spectrum animation
+  // Format timer
+  const formattedTimer = useMemo(() => {
+    const mins = Math.floor(sessionDurationSeconds / 60);
+    const secs = sessionDurationSeconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }, [sessionDurationSeconds]);
+
+  // Build cognitive grounding context string
+  const buildGroundingContext = () => {
+    const parts: string[] = [];
+
+    // 1. Recent Memories / Reflections
+    if (entries && entries.length > 0) {
+      parts.push(`RECENT REFLECTIONS (${entries.length} in archive):`);
+      entries.slice(0, 3).forEach((e, idx) => {
+        parts.push(`- "${e.title || 'Untitled'}" (${e.createdAt ? new Date(e.createdAt).toLocaleDateString() : 'Recent'}): ${e.summary || (e.messages?.[0]?.content ? e.messages[0].content.slice(0, 100) + '...' : '')}`);
+      });
+    }
+
+    // 2. Cognitive Growth & Patterns
+    if (cognitivePatterns) {
+      parts.push('\nLONG-TERM COGNITIVE PATTERNS:');
+      if (cognitivePatterns.recurringGoals?.length) {
+        parts.push(`- Goals/Ambitions: ${cognitivePatterns.recurringGoals.join('; ')}`);
+      }
+      if (cognitivePatterns.recurringChallenges?.length) {
+        parts.push(`- Recurring Challenges: ${cognitivePatterns.recurringChallenges.join('; ')}`);
+      }
+      if (cognitivePatterns.strengthsObserved?.length) {
+        parts.push(`- Observed Strengths: ${cognitivePatterns.strengthsObserved.join('; ')}`);
+      }
+    }
+
+    // 3. Document Intelligence Context
+    if (selectedDocId && userDocuments.length > 0) {
+      const activeDoc = userDocuments.find((d) => d.id === selectedDocId);
+      if (activeDoc) {
+        parts.push(`\nACTIVE DOCUMENT GROUNDING:\n- User has selected workspace document: "${activeDoc.fileName}" (${activeDoc.pageCount || 1} pages).`);
+        if (selectedDocChunks && selectedDocChunks.length > 0) {
+          const docText = selectedDocChunks
+            .map((chunk) => `[Page ${chunk.pageNumber || 1}]:\n${chunk.text}`)
+            .join('\n\n');
+          // Truncate to a safe token budget (up to 12,000 characters) for Live system instruction
+          const safeExcerpt = docText.length > 12000 
+            ? docText.slice(0, 12000) + '\n... [Additional document content truncated]' 
+            : docText;
+          parts.push(`FULL DOCUMENT CONTENT & KNOWLEDGE (Use this exact text to answer questions about the document, such as skills, projects, work experience, concepts, etc.):\n${safeExcerpt}`);
+        }
+      }
+    }
+
+    return parts.join('\n');
+  };
+
+  // Visualizer loop for model playback volume & fluid harmonics
   const startVisualizerLoop = () => {
     const updateLevels = () => {
       if (!isSessionActiveRef.current) {
-        setSpectrumBars(new Array(16).fill(0.08));
+        setWaveFrequencies([0.15, 0.25, 0.4, 0.6, 0.4, 0.25, 0.15]);
         setPlaybackVolume(0);
         return;
       }
@@ -148,56 +362,62 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
         const array = new Uint8Array(playbackAnalyserRef.current.frequencyBinCount);
         playbackAnalyserRef.current.getByteFrequencyData(array);
         let sum = 0;
-        const bars: number[] = [];
-        const step = Math.floor(array.length / 16);
+        const waves: number[] = [];
+        const step = Math.floor(array.length / 7);
 
-        for (let i = 0; i < 16; i++) {
+        for (let i = 0; i < 7; i++) {
           let barSum = 0;
           for (let j = 0; j < step; j++) {
             barSum += array[i * step + j] || 0;
           }
           const barAvg = barSum / (step * 255);
-          bars.push(Math.max(0.1, Math.min(1, barAvg * 1.8)));
+          waves.push(Math.max(0.12, Math.min(1, barAvg * 2.2)));
           sum += barAvg;
         }
 
-        const avg = sum / 16;
-        setPlaybackVolume(Math.min(1, avg * 2.2));
-        setSpectrumBars(bars);
+        const avg = sum / 7;
+        setPlaybackVolume(Math.min(1, avg * 2.4));
+        setWaveFrequencies(waves);
       } else if (state === 'listening' && !isMutedRef.current) {
-        // Generate soft dancing bars from microphone volume
         const currentVol = micVolume;
-        const bars = Array.from({ length: 16 }, (_, i) => {
-          const harmonic = Math.sin((i / 16) * Math.PI) * 0.8 + 0.2;
-          return Math.max(0.08, Math.min(0.95, currentVol * harmonic * 1.5 + Math.random() * 0.05));
-        });
-        setSpectrumBars(bars);
+        const waves = [
+          Math.max(0.15, currentVol * 0.4 + 0.1),
+          Math.max(0.2, currentVol * 0.7 + 0.15),
+          Math.max(0.3, currentVol * 1.1 + 0.2),
+          Math.max(0.4, currentVol * 1.5 + 0.25),
+          Math.max(0.3, currentVol * 1.1 + 0.2),
+          Math.max(0.2, currentVol * 0.7 + 0.15),
+          Math.max(0.15, currentVol * 0.4 + 0.1)
+        ];
+        setWaveFrequencies(waves);
         setPlaybackVolume(0);
       } else {
         setPlaybackVolume(0);
-        setSpectrumBars(new Array(16).fill(0.08));
+        setWaveFrequencies([0.15, 0.25, 0.4, 0.6, 0.4, 0.25, 0.15]);
       }
 
       animationFrameRef.current = requestAnimationFrame(updateLevels);
     };
+
     animationFrameRef.current = requestAnimationFrame(updateLevels);
   };
 
-  // Stop currently scheduled and playing audio immediately (barge-in / interrupt)
+  // Stop active scheduled audio playback
   const stopAllPlayback = () => {
     try {
-      scheduledAudioNodesRef.current.forEach(node => {
+      scheduledAudioNodesRef.current.forEach((node) => {
         try {
           node.stop();
           node.disconnect();
-        } catch {
-          // ignore
+        } catch (e) {
+          // Ignore if already ended
         }
       });
       scheduledAudioNodesRef.current = [];
-
-      if (playbackAudioContextRef.current) {
-        nextPlayTimeRef.current = playbackAudioContextRef.current.currentTime + 0.02;
+      nextPlayTimeRef.current = 0;
+      if (playbackGainNodeRef.current && playbackAudioContextRef.current) {
+        playbackGainNodeRef.current.gain.setValueAtTime(0, playbackAudioContextRef.current.currentTime);
+        playbackGainNodeRef.current.gain.setValueAtTime(isSpeakerMutedRef.current ? 0 : 1, playbackAudioContextRef.current.currentTime + 0.05);
       }
     } catch (e) {
       console.warn('Error stopping audio:', e);
@@ -224,7 +444,7 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
         playbackGainNodeRef.current = audioCtx.createGain();
         playbackAnalyserRef.current = audioCtx.createAnalyser();
         playbackAnalyserRef.current.fftSize = 64;
-        
+
         playbackGainNodeRef.current.connect(playbackAnalyserRef.current);
         playbackAnalyserRef.current.connect(audioCtx.destination);
       }
@@ -232,7 +452,6 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
       // Decode base64 to binary buffer safely
       const binaryString = window.atob(base64Audio);
       const rawLen = binaryString.length;
-      // Linear PCM 16-bit requires even byte count
       const safeLen = rawLen - (rawLen % 2);
       if (safeLen === 0) return;
 
@@ -241,7 +460,7 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
         bytes[i] = binaryString.charCodeAt(i);
       }
 
-      // Convert 16-bit PCM little-endian to Float32 [-1.0, 1.0] using DataView to avoid misalignment
+      // Convert 16-bit PCM little-endian to Float32 [-1.0, 1.0] using DataView
       const sampleCount = safeLen / 2;
       const float32Array = new Float32Array(sampleCount);
       const dataView = new DataView(bytes.buffer, bytes.byteOffset, safeLen);
@@ -251,7 +470,7 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
         float32Array[i] = int16 < 0 ? int16 / 32768 : int16 / 32767;
       }
 
-      // Apply subtle micro-ramp (fade-in / fade-out over first/last 16 samples) to eliminate click/beep artifacts
+      // Apply subtle micro-ramp (fade-in / fade-out) to eliminate DC offset click artifacts
       if (sampleCount > 32) {
         for (let i = 0; i < 16; i++) {
           const factor = i / 16;
@@ -337,7 +556,7 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
     return window.btoa(binary);
   };
 
-  // Start microphone streaming with zero-gain silent loop to prevent audio feedback & beeps
+  // Start microphone streaming with zero-gain silent loop to prevent audio feedback
   const startMicrophoneCapture = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -354,11 +573,10 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
       micAudioContextRef.current = audioCtx;
 
       const source = audioCtx.createMediaStreamSource(stream);
-      // Script processor buffer size 2048
       const processor = audioCtx.createScriptProcessor(2048, 1, 1);
       micProcessorRef.current = processor;
 
-      // CRITICAL FIX: Create silent gain node to avoid feeding microphone back to speaker destination (which causes high pitch beeps/whine)
+      // Silent gain node to avoid feeding microphone back to speaker destination
       const silentGain = audioCtx.createGain();
       silentGain.gain.value = 0;
       silentGainRef.current = silentGain;
@@ -403,7 +621,6 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
       };
 
       source.connect(processor);
-      // Route through 0-gain node to destination to keep processor active without audio bleed
       processor.connect(silentGain);
       silentGain.connect(audioCtx.destination);
     } catch (err: any) {
@@ -418,8 +635,9 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
   };
 
   // Start Live Voice Session
-  const startLiveSession = async () => {
+  const startLiveSession = async (customInitialPrompt?: string) => {
     setErrorMessage(null);
+    setSaveSuccessMessage(null);
     setState('connecting');
     setSessionDurationSeconds(0);
     isSessionActiveRef.current = true;
@@ -433,14 +651,42 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
       ws.onopen = async () => {
         setState('connected');
 
+        // Send setup with voice selection AND cognitive grounding context
+        const grounding = buildGroundingContext();
         ws.send(JSON.stringify({
           type: 'setup',
-          voiceName: selectedVoice
+          voiceName: selectedVoice,
+          groundingContext: grounding
         }));
 
         await startMicrophoneCapture();
         startVisualizerLoop();
         setState('listening');
+
+        // If an initial inquiry starter was selected, send it to prime the AI
+        if (customInitialPrompt) {
+          setTimeout(() => {
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              // Add to dialogue stream immediately
+              const nowStamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              setDialogueItems((prev) => [
+                ...prev,
+                {
+                  id: 'usr_' + Date.now(),
+                  role: 'user',
+                  text: customInitialPrompt,
+                  timestamp: nowStamp
+                }
+              ]);
+              setLastCompletedUtterance({ role: 'user', text: customInitialPrompt });
+
+              wsRef.current.send(JSON.stringify({
+                type: 'text',
+                text: customInitialPrompt
+              }));
+            }
+          }, 600);
+        }
       };
 
       ws.onmessage = (event) => {
@@ -452,11 +698,18 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
           } else if (data.type === 'audio') {
             playAudioChunk(data.audio);
           } else if (data.type === 'model_transcript_chunk') {
-            setCurrentStreamingModelText(prev => prev + data.text);
+            // Live append model words/tokens to active model streaming state
+            setActiveModelLiveText((prev) => prev + data.text);
           } else if (data.type === 'model_transcript') {
-            setCurrentStreamingModelText(data.text);
+            // If full model transcript arrives, merge or append safely
+            setActiveModelLiveText((prev) => {
+              if (!data.text) return prev;
+              if (data.text.startsWith(prev)) return data.text;
+              return prev + data.text;
+            });
           } else if (data.type === 'user_transcript') {
-            setCurrentInterimUserText(data.text);
+            // Live user speech transcription
+            setActiveUserLiveText(data.text);
           } else if (data.type === 'interrupted') {
             stopAllPlayback();
             setState('interrupted');
@@ -464,34 +717,65 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
               if (isSessionActiveRef.current) {
                 setState('listening');
               }
-            }, 500);
-          } else if (data.type === 'turn_complete' || data.type === 'generation_complete') {
-            setCurrentInterimUserText(userTxt => {
-              if (userTxt.trim()) {
-                setTranscriptHistory(hist => [
-                  ...hist,
-                  {
-                    id: 'usr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
-                    role: 'user',
-                    text: userTxt.trim(),
-                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            }, 400);
+          } else if (data.type === 'turn_complete') {
+            // Authoritative turn settlement: finalize user and model items into dialogue stream
+            const nowStamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+            setActiveUserLiveText((userTxt) => {
+              if (userTxt && userTxt.trim()) {
+                const cleanUserText = userTxt.trim();
+                setDialogueItems((prev) => {
+                  // Prevent duplicate entries if the text was already committed
+                  const lastItem = prev[prev.length - 1];
+                  if (lastItem && lastItem.role === 'user' && lastItem.text === cleanUserText) {
+                    return prev;
                   }
-                ]);
+                  return [
+                    ...prev,
+                    {
+                      id: 'usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+                      role: 'user',
+                      text: cleanUserText,
+                      timestamp: nowStamp
+                    }
+                  ];
+                });
+                setLastCompletedUtterance({ role: 'user', text: cleanUserText });
               }
               return '';
             });
 
-            setCurrentStreamingModelText(modelTxt => {
-              if (modelTxt.trim()) {
-                setTranscriptHistory(hist => [
-                  ...hist,
-                  {
-                    id: 'mod_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
-                    role: 'model',
-                    text: modelTxt.trim(),
-                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            setActiveModelLiveText((modelTxt) => {
+              if (modelTxt && modelTxt.trim()) {
+                const cleanModelText = modelTxt.trim();
+                setDialogueItems((prev) => {
+                  const lastItem = prev[prev.length - 1];
+                  if (lastItem && lastItem.role === 'model' && lastItem.text === cleanModelText) {
+                    return prev;
                   }
-                ]);
+                  return [
+                    ...prev,
+                    {
+                      id: 'mod_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+                      role: 'model',
+                      text: cleanModelText,
+                      timestamp: nowStamp
+                    }
+                  ];
+                });
+                setLastCompletedUtterance({ role: 'model', text: cleanModelText });
+
+                // Synthesize extracted takeaways for the right deck
+                if (cleanModelText.length > 40) {
+                  setExtractedTakeaways((prev) => {
+                    const snippet = cleanModelText.split(/[.!?]/)[0].trim();
+                    if (snippet && snippet.length > 15 && !prev.includes(snippet)) {
+                      return [...prev.slice(-3), snippet];
+                    }
+                    return prev;
+                  });
+                }
               }
               return '';
             });
@@ -500,17 +784,22 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
               setState('listening');
             }
           } else if (data.type === 'error') {
-            console.warn('MindMirror Live notice:', data.error);
+            console.warn('MindMirror Live error:', data.error);
             setErrorMessage(data.error || 'Live voice bridge notice.');
             setState('error');
+          } else if (data.type === 'session_closed') {
+            if (isSessionActiveRef.current) {
+              endLiveSession();
+            }
           }
-        } catch (err) {
-          // ignore
+        } catch (e) {
+          // Safe ignore
         }
       };
 
-      ws.onerror = () => {
-        setErrorMessage('Unable to connect to real-time voice server.');
+      ws.onerror = (err) => {
+        console.warn('WebSocket connection error:', err);
+        setErrorMessage('Could not connect to MindMirror live voice service.');
         setState('error');
       };
 
@@ -520,58 +809,74 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
         }
       };
     } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to start Live session.');
+      console.warn('Failed to start live session:', err);
+      setErrorMessage(`Failed to initiate voice session: ${err?.message || 'Unknown error'}`);
       setState('error');
     }
   };
 
-  // End Live Session and release all resources cleanly
+  // End Live Voice Session
   const endLiveSession = () => {
     isSessionActiveRef.current = false;
     setState('idle');
     setMicVolume(0);
     setPlaybackVolume(0);
-    setSpectrumBars(new Array(16).fill(0.08));
+
+    // Commit any in-flight live text before cleanup
+    if (activeUserLiveText.trim()) {
+      const nowStamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setDialogueItems((prev) => [
+        ...prev,
+        {
+          id: 'usr_' + Date.now(),
+          role: 'user',
+          text: activeUserLiveText.trim(),
+          timestamp: nowStamp
+        }
+      ]);
+      setActiveUserLiveText('');
+    }
+
+    if (activeModelLiveText.trim()) {
+      const nowStamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setDialogueItems((prev) => [
+        ...prev,
+        {
+          id: 'mod_' + Date.now(),
+          role: 'model',
+          text: activeModelLiveText.trim(),
+          timestamp: nowStamp
+        }
+      ]);
+      setActiveModelLiveText('');
+    }
 
     stopAllPlayback();
+
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
 
     if (wsRef.current) {
       try {
         wsRef.current.close();
-      } catch {
-        // ignore
+      } catch (e) {
+        // Ignored
       }
       wsRef.current = null;
     }
 
     if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach(track => track.stop());
+      micStreamRef.current.getTracks().forEach((track) => track.stop());
       micStreamRef.current = null;
-    }
-
-    if (micProcessorRef.current) {
-      try {
-        micProcessorRef.current.disconnect();
-      } catch {
-        // ignore
-      }
-      micProcessorRef.current = null;
-    }
-
-    if (silentGainRef.current) {
-      try {
-        silentGainRef.current.disconnect();
-      } catch {
-        // ignore
-      }
-      silentGainRef.current = null;
     }
 
     if (micAudioContextRef.current) {
       try {
         micAudioContextRef.current.close();
-      } catch {
-        // ignore
+      } catch (e) {
+        // Ignored
       }
       micAudioContextRef.current = null;
     }
@@ -579,632 +884,800 @@ export const LivePage: React.FC<LivePageProps> = ({ user }) => {
     if (playbackAudioContextRef.current) {
       try {
         playbackAudioContextRef.current.close();
-      } catch {
-        // ignore
+      } catch (e) {
+        // Ignored
       }
       playbackAudioContextRef.current = null;
-      playbackGainNodeRef.current = null;
-      playbackAnalyserRef.current = null;
-    }
-
-    // Preserve any pending turn text
-    if (currentInterimUserText.trim()) {
-      setTranscriptHistory(hist => [
-        ...hist,
-        {
-          id: 'usr_' + Date.now(),
-          role: 'user',
-          text: currentInterimUserText.trim(),
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }
-      ]);
-      setCurrentInterimUserText('');
-    }
-
-    if (currentStreamingModelText.trim()) {
-      setTranscriptHistory(hist => [
-        ...hist,
-        {
-          id: 'mod_' + Date.now(),
-          role: 'model',
-          text: currentStreamingModelText.trim(),
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }
-      ]);
-      setCurrentStreamingModelText('');
     }
   };
 
-  // Manual interrupt (barge-in button click)
+  // Manual User Interruption / Barge-in trigger
   const handleManualInterrupt = () => {
     stopAllPlayback();
-    setState('interrupted');
+    setState('listening');
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'interrupt' }));
     }
-    setTimeout(() => {
-      if (isSessionActiveRef.current) {
-        setState('listening');
-      }
-    }, 400);
   };
 
-  // Switch voice dynamically
-  const handleSelectVoice = (voice: LiveVoiceName) => {
-    setSelectedVoice(voice);
-    setShowVoiceDropdown(false);
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN && isSessionActiveRef.current) {
-      wsRef.current.send(JSON.stringify({
-        type: 'setup',
-        voiceName: voice
-      }));
-    }
-  };
-
-  // Prompt chip click - inject topic into live conversation or start with it
-  const handleSelectPrompt = async (promptText: string) => {
-    if (state === 'idle') {
-      await startLiveSession();
-      setTimeout(() => {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({
-            type: 'text',
-            text: promptText
-          }));
-        }
-      }, 1000);
-    } else if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'text',
-        text: promptText
-      }));
-    }
-  };
-
-  // Format seconds to mm:ss
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  // Copy transcript to clipboard
+  // Copy full live dialogue
   const handleCopyTranscript = () => {
-    const text = transcriptHistory
-      .map(item => `[${item.timestamp}] ${item.role === 'user' ? (user.displayName || 'You') : `MindMirror (${selectedVoice})`}: ${item.text}`)
-      .join('\n\n');
-    navigator.clipboard.writeText(text);
+    if (dialogueItems.length === 0 && !activeModelLiveText && !activeUserLiveText) return;
+    const lines = dialogueItems.map((item) => `[${item.timestamp}] ${item.role === 'user' ? (user.displayName || 'User') : `MindMirror (${selectedVoice})`}: ${item.text}`);
+    if (activeUserLiveText) lines.push(`[Live] ${user.displayName || 'User'}: ${activeUserLiveText}`);
+    if (activeModelLiveText) lines.push(`[Live] MindMirror (${selectedVoice}): ${activeModelLiveText}`);
+    
+    navigator.clipboard.writeText(lines.join('\n\n'));
     setCopiedTranscript(true);
     setTimeout(() => setCopiedTranscript(false), 2000);
   };
 
-  // Clear conversation transcript
-  const handleClearTranscript = () => {
-    setTranscriptHistory([]);
-    setCurrentInterimUserText('');
-    setCurrentStreamingModelText('');
+  // Save live session into Reflections Journal (Firestore)
+  const handleSaveToReflections = async () => {
+    if (!user || !user.uid || dialogueItems.length === 0) return;
+    setIsSavingJournal(true);
+    setSaveSuccessMessage(null);
+
+    try {
+      const { db } = await initFirebase();
+      const newEntryId = `live_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const entryRef = doc(db, 'users', user.uid, 'interactions', newEntryId);
+
+      const title = dialogueItems.find((d) => d.role === 'user')?.text.slice(0, 45) || 'Live Cognitive Voice Reflection';
+      const fullSummary = dialogueItems.map((d) => `${d.role === 'user' ? 'User' : 'MindMirror'}: ${d.text}`).join('\n\n');
+
+      const journalData: Partial<JournalEntry> = {
+        id: newEntryId,
+        userId: user.uid,
+        title: title.length > 40 ? title + '...' : title,
+        intent: 'deep_reflection',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        summary: `Live voice inquiry (${formattedTimer}) with persona ${selectedVoice}. Key dialogue:\n${fullSummary.slice(0, 400)}...`,
+        messages: dialogueItems.map((item) => ({
+          id: item.id,
+          role: item.role,
+          content: item.text,
+          timestamp: new Date().toISOString()
+        })),
+        insights: {
+          mood: 'Contemplative & Grounded',
+          keyThemes: ['Live Voice Reflection', 'Cognitive Dialogue'],
+          takeaways: extractedTakeaways.length > 0 ? extractedTakeaways : ['Completed live mindful dialogue'],
+          actionItems: []
+        }
+      };
+
+      const sanitized = sanitizePayload(journalData);
+      await setDoc(entryRef, sanitized);
+
+      setSaveSuccessMessage('Session saved to your Reflections journal!');
+      if (onRefreshEntries) {
+        onRefreshEntries();
+      }
+      setTimeout(() => setSaveSuccessMessage(null), 4000);
+    } catch (err: any) {
+      console.error('Failed to save live reflection:', err);
+      setErrorMessage(`Failed to save reflection: ${err?.message || 'Firestore write failed'}`);
+    } finally {
+      setIsSavingJournal(false);
+    }
   };
 
-  // Dynamic Status Badge Configuration
-  const getStatusConfig = () => {
+  // State descriptor for top pill
+  const stateBadge = useMemo(() => {
     switch (state) {
-      case 'idle':
-        return {
-          label: 'Sanctuary Ready',
-          dot: 'bg-stone-400',
-          badge: 'bg-white/80 text-stone-600 border-stone-200 shadow-2xs'
-        };
       case 'connecting':
-        return {
-          label: 'Connecting Voice Sanctuary...',
-          dot: 'bg-amber-500 animate-ping',
-          badge: 'bg-amber-50/90 text-amber-900 border-amber-300 animate-pulse shadow-xs'
-        };
+        return { label: 'Connecting Voice Bridge...', color: 'bg-amber-100 text-amber-900 border-amber-300' };
       case 'connected':
-        return {
-          label: 'Bridge Active',
-          dot: 'bg-emerald-500',
-          badge: 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-xs'
-        };
+        return { label: 'Voice Sanctuary Ready', color: 'bg-emerald-100 text-emerald-900 border-emerald-300' };
       case 'listening':
-        return {
-          label: isMuted ? 'Microphone Muted' : 'Listening with Presence...',
-          dot: isMuted ? 'bg-rose-400' : 'bg-amber-500 animate-pulse',
-          badge: isMuted ? 'bg-rose-50 text-rose-800 border-rose-200' : 'bg-amber-100/90 text-amber-950 border-amber-300 shadow-xs'
-        };
+        return { label: isMuted ? 'Microphone Muted' : 'Listening Mindfully...', color: 'bg-amber-100 text-amber-900 border-amber-300' };
       case 'speaking':
-        return {
-          label: `MindMirror Reflecting (${selectedVoice})`,
-          dot: 'bg-indigo-600 animate-pulse',
-          badge: 'bg-indigo-50/90 text-indigo-900 border-indigo-200 shadow-xs'
-        };
+        return { label: `Reflecting • ${selectedVoice}`, color: 'bg-indigo-100 text-indigo-900 border-indigo-300' };
       case 'interrupted':
-        return {
-          label: 'Present — Listening to You',
-          dot: 'bg-rose-500',
-          badge: 'bg-rose-50 text-rose-900 border-rose-300 shadow-xs'
-        };
+        return { label: 'Attentive & Ready', color: 'bg-stone-200 text-stone-800 border-stone-300' };
       case 'error':
-        return {
-          label: 'Connection Interrupted',
-          dot: 'bg-red-500',
-          badge: 'bg-red-50 text-red-800 border-red-200 shadow-xs'
-        };
+        return { label: 'Connection Notice', color: 'bg-rose-100 text-rose-900 border-rose-300' };
+      default:
+        return { label: 'Voice Sanctuary Idle', color: 'bg-stone-100 text-stone-700 border-stone-200' };
     }
-  };
+  }, [state, isMuted, selectedVoice]);
 
-  const statusConfig = getStatusConfig();
-
-  // Dynamic Resonant Voice Orb Calculations
-  const getOrbTransforms = () => {
-    if (state === 'speaking') {
-      const boost = 1 + playbackVolume * 0.45;
-      return {
-        core: boost,
-        mid: 1 + playbackVolume * 0.75,
-        outer: 1 + playbackVolume * 1.15
-      };
-    }
-    if (state === 'listening' && !isMuted) {
-      const boost = 1 + micVolume * 0.35;
-      return {
-        core: boost,
-        mid: 1 + micVolume * 0.65,
-        outer: 1 + micVolume * 0.95
-      };
-    }
-    if (state === 'connecting') {
-      return { core: 1.05, mid: 1.15, outer: 1.25 };
-    }
-    return { core: 1, mid: 1, outer: 1 };
-  };
-
-  const orb = getOrbTransforms();
+  const activeVoiceObj = AVAILABLE_VOICES.find((v) => v.name === selectedVoice) || AVAILABLE_VOICES[0];
 
   return (
-    <div className="relative min-h-[calc(100vh-4rem)] flex flex-col justify-between p-3 sm:p-6 lg:p-8 max-w-5xl mx-auto select-none">
-      {/* Background Zen Glow */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none flex items-center justify-center -z-10">
-        <div className={`w-[36rem] h-[36rem] rounded-full blur-3xl opacity-35 transition-all duration-1000 ${
-          state === 'speaking' ? 'bg-indigo-300/60 scale-110' :
-          state === 'listening' ? 'bg-amber-300/50 scale-105' :
-          state === 'interrupted' ? 'bg-rose-300/50' : 'bg-stone-300/40 scale-95'
-        }`} />
-      </div>
-
-      {/* 1. Header Bar: Title, Live Persona Selector, Session Timer & Status */}
-      <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-stone-200/80 backdrop-blur-xs">
-        <div className="flex items-center gap-3.5">
-          <div className="w-11 h-11 rounded-2xl bg-stone-900 text-amber-300 flex items-center justify-center shadow-sm ring-1 ring-stone-800">
-            <Radio className={`w-5 h-5 ${state === 'speaking' || state === 'listening' ? 'animate-pulse text-amber-300' : 'text-stone-300'}`} />
+    <div id="mindmirror-live-workspace" className="min-h-[calc(100vh-4rem)] bg-stone-50/70 p-4 sm:p-6 lg:p-8 flex flex-col justify-between max-w-7xl mx-auto">
+      
+      {/* Top Header & Cognitive Grounding Bar */}
+      <div id="live-header-bar" className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-stone-200/80">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider bg-amber-100/80 text-amber-900 border border-amber-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-pulse"></span>
+              MindMirror Live
+            </span>
+            <span className="text-xs text-stone-500 font-medium">Cognitive Voice Sanctuary</span>
           </div>
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-xl sm:text-2xl font-serif font-bold text-stone-900 tracking-tight">
-                MindMirror Live
-              </h1>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider bg-rose-50 text-rose-800 border border-rose-200/90 shadow-2xs">
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-ping" />
-                Live Spoken Voice
-              </span>
-            </div>
-            <p className="text-xs text-stone-500 font-sans mt-0.5">
-              Bidirectional real-time spoken dialogue with fluid reflection and zero latency.
-            </p>
-          </div>
+          <h1 className="text-xl sm:text-2xl font-serif font-bold text-stone-900 mt-1 tracking-tight">
+            Conversational Thinking & Real-Time Reflection
+          </h1>
         </div>
 
-        {/* Top Controls: Voice Selector Dropdown, Timer & Transcript */}
-        <div className="flex items-center flex-wrap gap-2.5 w-full sm:w-auto justify-between sm:justify-end">
-          {/* Active Session Timer */}
-          {state !== 'idle' && (
-            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/90 border border-stone-200 text-xs font-mono text-stone-700 shadow-2xs">
-              <Clock className="w-3.5 h-3.5 text-stone-400" />
-              <span>{formatDuration(sessionDurationSeconds)}</span>
-            </div>
-          )}
-
+        {/* Right Header Controls: Voice Selector & Session Duration */}
+        <div className="flex items-center flex-wrap gap-2.5">
           {/* Voice Selector Dropdown */}
           <div className="relative">
             <button
-              type="button"
-              id="live-voice-selector-btn"
+              id="voice-persona-dropdown-btn"
               onClick={() => setShowVoiceDropdown(!showVoiceDropdown)}
-              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-white/95 border border-stone-300 hover:border-stone-400 text-xs font-medium text-stone-800 shadow-2xs hover:shadow-xs transition cursor-pointer"
+              disabled={state !== 'idle' && state !== 'error'}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white border border-stone-200 text-xs font-medium text-stone-800 hover:bg-stone-50 shadow-xs transition-colors disabled:opacity-75"
+              title="Select Voice Persona"
             >
-              <Headphones className="w-3.5 h-3.5 text-stone-500" />
+              <Headphones className="w-3.5 h-3.5 text-amber-600" />
               <span>Voice: <strong className="font-semibold text-stone-900">{selectedVoice}</strong></span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-stone-100 text-stone-600 hidden sm:inline">{activeVoiceObj.vibe}</span>
               <ChevronDown className="w-3.5 h-3.5 text-stone-400" />
             </button>
 
             {showVoiceDropdown && (
-              <div className="absolute right-0 mt-2 w-72 bg-white/95 backdrop-blur-xl rounded-2xl border border-stone-200/90 shadow-xl py-2 z-50 animate-in fade-in zoom-in-95 duration-100">
-                <div className="px-3.5 py-1.5 border-b border-stone-100 mb-1 flex items-center justify-between">
-                  <span className="text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold">
-                    Select Voice Persona
-                  </span>
-                  <Sparkles className="w-3 h-3 text-amber-500" />
+              <div 
+                id="voice-persona-menu"
+                className="absolute right-0 mt-2 w-72 bg-white rounded-xl shadow-lg border border-stone-200 p-2 z-50 animate-in fade-in zoom-in-95 duration-150"
+              >
+                <div className="px-2 py-1 text-[11px] font-semibold text-stone-400 uppercase tracking-wider">
+                  Select Reflective Persona
                 </div>
-                {AVAILABLE_VOICES.map(v => (
-                  <button
-                    key={v.name}
-                    type="button"
-                    onClick={() => handleSelectVoice(v.name)}
-                    className={`w-full text-left px-3.5 py-2.5 flex items-start justify-between hover:bg-stone-50 transition cursor-pointer ${
-                      selectedVoice === v.name ? 'bg-amber-50/70' : ''
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <p className="text-xs font-semibold text-stone-900">{v.label}</p>
-                        <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-md bg-stone-100 text-stone-600">
-                          {v.tone}
-                        </span>
+                <div className="space-y-1 mt-1">
+                  {AVAILABLE_VOICES.map((voice) => (
+                    <button
+                      key={voice.name}
+                      onClick={() => {
+                        setSelectedVoice(voice.name);
+                        setShowVoiceDropdown(false);
+                      }}
+                      className={`w-full text-left p-2 rounded-lg text-xs transition-colors flex items-start justify-between ${
+                        selectedVoice === voice.name ? 'bg-amber-50/80 border border-amber-200/80 text-amber-950 font-medium' : 'hover:bg-stone-50 text-stone-700'
+                      }`}
+                    >
+                      <div>
+                        <div className="font-semibold flex items-center gap-1.5">
+                          {voice.label}
+                          <span className="text-[10px] font-normal text-stone-500">({voice.tone})</span>
+                        </div>
+                        <p className="text-[11px] text-stone-500 mt-0.5 leading-snug">{voice.desc}</p>
                       </div>
-                      <p className="text-[11px] text-stone-500 mt-0.5 leading-snug">{v.desc}</p>
-                    </div>
-                    {selectedVoice === v.name && (
-                      <Check className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Connection Status Pill */}
-          <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-mono font-medium ${statusConfig.badge}`}>
-            <span className={`w-2 h-2 rounded-full ${statusConfig.dot}`} />
-            <span>{statusConfig.label}</span>
-          </div>
-
-          {/* Transcript Toggle Button */}
-          <button
-            type="button"
-            id="live-transcript-toggle-btn"
-            onClick={() => setShowTranscriptDrawer(!showTranscriptDrawer)}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition cursor-pointer shadow-2xs ${
-              showTranscriptDrawer 
-                ? 'bg-stone-900 text-stone-50 border-stone-900' 
-                : 'bg-white/95 border-stone-300 text-stone-700 hover:bg-stone-50 hover:border-stone-400'
-            }`}
-          >
-            <MessageSquare className="w-3.5 h-3.5 text-stone-500" />
-            <span>Transcript</span>
-            {transcriptHistory.length > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-stone-950 text-[10px] font-mono font-bold">
-                {transcriptHistory.length}
-              </span>
-            )}
-          </button>
-        </div>
-      </header>
-
-      {/* Error Alert Banner */}
-      {errorMessage && (
-        <div className="my-3 p-3.5 rounded-2xl bg-red-50/90 border border-red-200 text-red-900 text-xs flex items-start gap-3 backdrop-blur-xs">
-          <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <p className="font-semibold">Voice Bridge Notice</p>
-            <p className="mt-0.5 text-red-700">{errorMessage}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setErrorMessage(null)}
-            className="text-red-500 hover:text-red-800 text-xs font-mono font-bold cursor-pointer"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {/* 2. Main Center Sanctuary: Resonant Harmonic Orb & Visualizer */}
-      <main className="flex-1 flex flex-col items-center justify-center py-6 sm:py-10 relative">
-        {/* Harmonic Multi-Wave Voice Orb */}
-        <div className="relative flex items-center justify-center my-4 sm:my-6">
-          {/* Outermost Atmospheric Aura */}
-          <div 
-            className={`absolute rounded-full transition-all duration-300 ${
-              state === 'speaking' ? 'bg-indigo-300/25 border border-indigo-400/30' :
-              state === 'listening' ? 'bg-amber-300/25 border border-amber-400/30' :
-              state === 'interrupted' ? 'bg-rose-300/30 border border-rose-400/30' : 
-              'bg-stone-200/30 border border-stone-300/40'
-            }`}
-            style={{
-              width: '260px',
-              height: '260px',
-              transform: `scale(${orb.outer})`,
-              transition: 'transform 0.12s ease-out'
-            }}
-          />
-
-          {/* Middle Harmonic Wave */}
-          <div 
-            className={`absolute rounded-full transition-all duration-300 ${
-              state === 'speaking' ? 'bg-indigo-400/30 border border-indigo-500/40' :
-              state === 'listening' ? 'bg-amber-400/30 border border-amber-500/40' :
-              state === 'interrupted' ? 'bg-rose-400/30' : 
-              'bg-stone-300/40'
-            }`}
-            style={{
-              width: '200px',
-              height: '200px',
-              transform: `scale(${orb.mid})`,
-              transition: 'transform 0.1s ease-out'
-            }}
-          />
-
-          {/* Core Interactive Center Sphere */}
-          <div 
-            className={`w-36 h-36 sm:w-40 sm:h-40 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300 relative z-10 border ${
-              state === 'speaking' ? 'bg-gradient-to-tr from-indigo-950 via-indigo-900 to-amber-700 text-amber-200 border-indigo-400/50 shadow-indigo-900/30' :
-              state === 'listening' ? (isMuted ? 'bg-stone-900 text-stone-400 border-stone-700' : 'bg-gradient-to-tr from-stone-950 via-stone-900 to-amber-700 text-amber-300 border-amber-500/40 shadow-amber-900/20') :
-              state === 'connecting' ? 'bg-stone-900 text-amber-300 border-amber-400/50 animate-pulse' :
-              state === 'interrupted' ? 'bg-gradient-to-tr from-rose-950 to-stone-950 text-rose-200 border-rose-400/50' :
-              'bg-stone-900 text-stone-200 hover:scale-105 border-stone-700 hover:border-amber-400/50 shadow-xl'
-            }`}
-            style={{
-              transform: `scale(${orb.core})`,
-              transition: 'transform 0.08s ease-out'
-            }}
-          >
-            {state === 'idle' ? (
-              <button
-                type="button"
-                id="live-start-hero-btn"
-                onClick={startLiveSession}
-                className="w-full h-full rounded-full flex flex-col items-center justify-center gap-1.5 cursor-pointer text-stone-100 hover:text-amber-300 transition group p-3"
-                title="Start Voice Session"
-              >
-                <div className="w-10 h-10 rounded-full bg-amber-400/10 flex items-center justify-center group-hover:scale-110 transition">
-                  <Radio className="w-6 h-6 text-amber-300 animate-pulse" />
+                      {selectedVoice === voice.name && <Check className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />}
+                    </button>
+                  ))}
                 </div>
-                <span className="text-xs font-mono uppercase font-bold tracking-widest text-amber-300 group-hover:text-amber-200">
-                  Begin Voice
-                </span>
-              </button>
-            ) : (
-              <div className="flex flex-col items-center justify-center gap-1.5 p-3">
-                {state === 'speaking' && <Sparkles className="w-8 h-8 text-amber-300 animate-spin" />}
-                {state === 'listening' && (
-                  isMuted ? <MicOff className="w-8 h-8 text-stone-400" /> : <Mic className="w-8 h-8 text-amber-300 animate-pulse" />
-                )}
-                {state === 'connecting' && <div className="w-7 h-7 border-2 border-amber-300/40 border-t-amber-300 rounded-full animate-spin" />}
-                {state === 'interrupted' && <Hand className="w-8 h-8 text-rose-300" />}
-
-                <span className="text-[10px] font-mono uppercase tracking-widest text-stone-300 font-semibold">
-                  {state === 'speaking' ? 'Reflecting' :
-                   state === 'listening' ? (isMuted ? 'Muted' : 'Listening') :
-                   state === 'connecting' ? 'Connecting' :
-                   state === 'interrupted' ? 'Attentive' : 'Active'}
-                </span>
               </div>
             )}
           </div>
-        </div>
 
-        {/* Real-time Subtitles / Spoken Utterance Stream Container */}
-        <div className="w-full max-w-xl text-center min-h-[90px] flex flex-col items-center justify-center px-4 py-6 mt-2">
-          {state === 'idle' && (
-            <div className="space-y-6">
-              <p className="text-stone-500 text-sm font-serif italic max-w-md mx-auto">
-                "Speak openly. MindMirror listens with mindful clarity, reflecting back insights to untangle your thoughts in real time."
-              </p>
-
-              {/* Reflection Inspiration Prompt Chips */}
-              <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
-                {REFLECTION_PROMPTS.map((p, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => handleSelectPrompt(p.prompt)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/80 hover:bg-stone-900 hover:text-amber-300 text-stone-700 text-xs font-medium border border-stone-200/90 shadow-2xs hover:shadow-xs transition active:scale-95 cursor-pointer"
-                  >
-                    <Feather className="w-3 h-3 text-amber-600" />
-                    <span>{p.label}</span>
-                  </button>
-                ))}
-              </div>
+          {/* Active Session Timer */}
+          {state !== 'idle' && (
+            <div id="session-timer-pill" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-900 text-amber-300 text-xs font-mono font-medium shadow-xs">
+              <Clock className="w-3.5 h-3.5 text-amber-400" />
+              <span>{formattedTimer}</span>
             </div>
           )}
 
-          {state === 'connecting' && (
-            <p className="text-amber-800 text-sm font-mono animate-pulse">
-              Establishing audio bridge with Gemini Live...
-            </p>
+          {/* Save to Reflections Journal Button */}
+          {dialogueItems.length > 0 && (
+            <button
+              id="save-live-session-btn"
+              onClick={handleSaveToReflections}
+              disabled={isSavingJournal}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium shadow-xs transition-all disabled:opacity-60"
+            >
+              {isSavingJournal ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <BookmarkPlus className="w-3.5 h-3.5" />
+              )}
+              <span>{isSavingJournal ? 'Saving...' : 'Save to Journal'}</span>
+            </button>
           )}
 
-          {state === 'listening' && !currentInterimUserText && !currentStreamingModelText && (
-            <p className="text-stone-400 text-xs font-mono tracking-wide">
-              {isMuted ? 'Microphone is muted. Unmute to speak.' : 'Listening... Speak naturally when you are ready.'}
-            </p>
-          )}
-
-          {/* User Spoken Utterance (Real-Time Subtitle) */}
-          {currentInterimUserText && (
-            <div className="bg-amber-50/90 border border-amber-200 rounded-2xl px-5 py-3 shadow-xs max-w-lg mb-2 backdrop-blur-xs animate-in fade-in">
-              <span className="text-[10px] font-mono font-bold uppercase text-amber-800 block mb-0.5 text-left flex items-center gap-1">
-                <Flame className="w-3 h-3 text-amber-600" /> You:
-              </span>
-              <p className="text-sm font-sans text-stone-900 font-medium text-left leading-relaxed">
-                "{currentInterimUserText}"
-              </p>
-            </div>
-          )}
-
-          {/* Model Spoken Utterance (Real-Time Subtitle) */}
-          {currentStreamingModelText && (
-            <div className="bg-white/95 border border-indigo-100 rounded-2xl px-5 py-3.5 shadow-sm max-w-lg backdrop-blur-xs animate-in fade-in">
-              <span className="text-[10px] font-mono font-bold uppercase text-indigo-800 block mb-0.5 text-left flex items-center gap-1.5">
-                <Sparkles className="w-3 h-3 text-amber-500" /> MindMirror Live ({selectedVoice}):
-              </span>
-              <p className="text-sm font-serif text-stone-900 leading-relaxed text-left italic">
-                {currentStreamingModelText}
-              </p>
-            </div>
+          {/* Copy Transcript Button */}
+          {dialogueItems.length > 0 && (
+            <button
+              id="copy-transcript-btn"
+              onClick={handleCopyTranscript}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-stone-200 hover:bg-stone-50 text-stone-700 text-xs font-medium shadow-xs transition-colors"
+              title="Copy conversation transcript"
+            >
+              {copiedTranscript ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-stone-500" />}
+              <span>{copiedTranscript ? 'Copied' : 'Copy'}</span>
+            </button>
           )}
         </div>
-      </main>
+      </div>
 
-      {/* 3. Bottom Control Console (Clean, refined controls when session is active) */}
-      {state !== 'idle' && (
-        <footer className="pt-4 pb-2 border-t border-stone-200/80 flex items-center justify-center">
-          <div className="flex items-center gap-3">
-            {/* Mute Mic Button */}
-            <button
-              type="button"
-              id="live-mute-mic-btn"
-              onClick={() => setIsMuted(!isMuted)}
-              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl border transition cursor-pointer shadow-2xs ${
-                isMuted 
-                  ? 'bg-rose-50 border-rose-300 text-rose-800 hover:bg-rose-100' 
-                  : 'bg-white/95 border-stone-300 text-stone-800 hover:bg-stone-50'
-              }`}
-              title={isMuted ? 'Unmute Microphone' : 'Mute Microphone'}
-            >
-              {isMuted ? <MicOff className="w-4 h-4 text-rose-600" /> : <Mic className="w-4 h-4 text-amber-600" />}
-              <span className="text-xs font-medium">{isMuted ? 'Unmute' : 'Mute Mic'}</span>
-            </button>
-
-            {/* Mute Speaker Button */}
-            <button
-              type="button"
-              id="live-mute-speaker-btn"
-              onClick={() => setIsSpeakerMuted(!isSpeakerMuted)}
-              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl border transition cursor-pointer shadow-2xs ${
-                isSpeakerMuted 
-                  ? 'bg-rose-50 border-rose-300 text-rose-800 hover:bg-rose-100' 
-                  : 'bg-white/95 border-stone-300 text-stone-800 hover:bg-stone-50'
-              }`}
-              title={isSpeakerMuted ? 'Unmute Voice Playback' : 'Mute Voice Playback'}
-            >
-              {isSpeakerMuted ? <VolumeX className="w-4 h-4 text-rose-600" /> : <Volume2 className="w-4 h-4 text-stone-700" />}
-              <span className="text-xs font-medium">{isSpeakerMuted ? 'Unmute Audio' : 'Mute Speaker'}</span>
-            </button>
-
-            {/* Manual Interrupt Button (Active during model speech) */}
-            {state === 'speaking' && (
-              <button
-                type="button"
-                id="live-interrupt-btn"
-                onClick={handleManualInterrupt}
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-950 text-xs font-semibold shadow-xs transition active:scale-95 cursor-pointer animate-in fade-in"
-              >
-                <Hand className="w-4 h-4 text-amber-800" />
-                <span>Interrupt</span>
-              </button>
-            )}
-
-            {/* End Session Button */}
-            <button
-              type="button"
-              id="live-end-session-btn"
-              onClick={endLiveSession}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-stone-900 hover:bg-stone-800 text-rose-300 hover:text-rose-200 text-xs font-semibold shadow-md active:scale-98 transition cursor-pointer"
-            >
-              <Power className="w-4 h-4 text-rose-400" />
-              <span>End Session</span>
-            </button>
+      {/* Success Notification Banner */}
+      {saveSuccessMessage && (
+        <div className="mt-3 px-4 py-2.5 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl text-xs font-medium flex items-center justify-between shadow-xs animate-in fade-in duration-200">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{saveSuccessMessage}</span>
           </div>
-        </footer>
+          {onNavigate && (
+            <button
+              onClick={() => onNavigate('/reflections')}
+              className="underline hover:text-emerald-950 font-semibold ml-4"
+            >
+              View in Reflections →
+            </button>
+          )}
+        </div>
       )}
 
-      {/* 4. Slide-Over Transcript History Drawer */}
-      {showTranscriptDrawer && (
-        <aside className="fixed inset-y-0 right-0 w-full sm:w-96 bg-white/95 backdrop-blur-xl border-l border-stone-200 shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-200">
-          <div className="p-4 border-b border-stone-200 flex items-center justify-between bg-stone-50/80">
-            <div className="flex items-center gap-2">
-              <MessageSquare className="w-4 h-4 text-stone-700" />
-              <h2 className="text-sm font-semibold text-stone-900">Live Voice Transcript</h2>
+      {/* Error Notice Banner */}
+      {errorMessage && (
+        <div className="mt-3 px-4 py-2.5 bg-rose-50 border border-rose-200 text-rose-900 rounded-xl text-xs font-medium flex items-center justify-between shadow-xs">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+          <button
+            onClick={() => setErrorMessage(null)}
+            className="text-rose-700 hover:text-rose-900 text-xs font-bold"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Main 2-Column Cognitive Workspace Grid */}
+      <div id="live-workspace-content" className="grid grid-cols-1 lg:grid-cols-12 gap-6 mt-6 flex-1 items-stretch">
+        
+        {/* Left Column: Live Voice Sanctuary & Live Dialogue Stream (7 cols) */}
+        <div id="live-dialogue-column" className="lg:col-span-7 flex flex-col justify-between bg-white rounded-2xl border border-stone-200/90 shadow-sm p-5 sm:p-6 relative overflow-hidden">
+          
+          {/* Top Presence & Fluid Voice Orb Area */}
+          <div className="flex flex-col items-center justify-center pt-2 pb-4">
+            
+            {/* Status Pill */}
+            <div className="mb-4">
+              <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border shadow-xs transition-all duration-300 ${stateBadge.color}`}>
+                <span className={`w-2 h-2 rounded-full ${
+                  state === 'listening' ? 'bg-amber-500 animate-pulse' :
+                  state === 'speaking' ? 'bg-indigo-600 animate-ping' :
+                  state === 'connected' ? 'bg-emerald-500' : 'bg-stone-400'
+                }`}></span>
+                <span>{stateBadge.label}</span>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5">
-              {transcriptHistory.length > 0 && (
+
+            {/* Fluid Harmonic Voice Presence (Ethereal Luminous Sphere - No DJ Disc) */}
+            <div className="relative flex items-center justify-center my-2">
+              
+              {/* Outer Radiant Auroral Glow Ring */}
+              <div 
+                className={`absolute w-56 h-56 rounded-full transition-all duration-700 ease-out pointer-events-none ${
+                  state === 'speaking' 
+                    ? 'bg-gradient-to-tr from-indigo-300/40 via-amber-200/50 to-purple-300/40 blur-2xl scale-125 opacity-90 animate-aurora-spin'
+                    : state === 'listening'
+                    ? 'bg-gradient-to-tr from-amber-300/30 via-orange-200/40 to-yellow-300/30 blur-xl scale-110 opacity-70 animate-harmonic-pulse'
+                    : 'bg-gradient-to-tr from-stone-200/30 via-amber-100/20 to-stone-200/30 blur-lg scale-95 opacity-40'
+                }`}
+                style={{
+                  transform: `scale(${state === 'speaking' ? 1 + playbackVolume * 0.4 : state === 'listening' ? 1 + micVolume * 0.35 : 1})`
+                }}
+              />
+
+              {/* Harmonic Frequency Resonance Wave Rings */}
+              {(state === 'listening' || state === 'speaking') && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  {waveFrequencies.map((freq, idx) => (
+                    <div
+                      key={idx}
+                      className="absolute rounded-full border border-amber-400/30 transition-all duration-150"
+                      style={{
+                        width: `${140 + idx * 14}px`,
+                        height: `${140 + idx * 14}px`,
+                        transform: `scale(${1 + freq * 0.35})`,
+                        opacity: 0.15 + freq * 0.45
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Central Luminous Organic Core Sphere */}
+              <button
+                id="voice-orb-interactive-btn"
+                onClick={() => {
+                  if (state === 'idle' || state === 'error') {
+                    startLiveSession();
+                  } else if (state === 'speaking') {
+                    handleManualInterrupt();
+                  } else {
+                    endLiveSession();
+                  }
+                }}
+                className={`relative z-10 w-36 h-36 sm:w-40 sm:h-40 rounded-full flex flex-col items-center justify-center transition-all duration-500 shadow-md cursor-pointer group focus:outline-none focus:ring-4 focus:ring-amber-300/50 ${
+                  state === 'speaking'
+                    ? 'bg-gradient-to-br from-indigo-900 via-stone-900 to-indigo-950 text-white ring-4 ring-indigo-300/40'
+                    : state === 'listening'
+                    ? 'bg-gradient-to-br from-amber-950 via-stone-900 to-stone-950 text-white ring-4 ring-amber-400/40'
+                    : 'bg-gradient-to-br from-stone-900 via-stone-800 to-stone-900 text-stone-100 hover:scale-105 ring-2 ring-stone-200'
+                }`}
+                title={state === 'idle' ? 'Click to Begin Voice Session' : 'Click to End Voice Session'}
+              >
+                {/* Subtle Inner Glass Refraction */}
+                <div className="absolute inset-1 rounded-full bg-gradient-to-t from-transparent via-white/5 to-white/20 pointer-events-none" />
+
+                {/* Center Icon & Label */}
+                <div className="flex flex-col items-center justify-center z-10 text-center px-2">
+                  {state === 'idle' ? (
+                    <>
+                      <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-300 mb-1 group-hover:bg-amber-500/30 transition-colors">
+                        <Mic className="w-5 h-5" />
+                      </div>
+                      <span className="text-xs font-semibold tracking-wide text-amber-100 uppercase">Begin Voice</span>
+                      <span className="text-[10px] text-stone-400 mt-0.5">Mindful Dialogue</span>
+                    </>
+                  ) : state === 'connecting' ? (
+                    <>
+                      <RefreshCw className="w-7 h-7 text-amber-400 animate-spin mb-1" />
+                      <span className="text-xs font-semibold text-amber-200">Connecting</span>
+                    </>
+                  ) : state === 'speaking' ? (
+                    <>
+                      <div className="flex items-center gap-1 h-6 mb-1">
+                        {waveFrequencies.slice(0, 5).map((f, i) => (
+                          <div
+                            key={i}
+                            className="w-1 bg-indigo-300 rounded-full transition-all duration-100"
+                            style={{ height: `${Math.max(4, f * 24)}px` }}
+                          />
+                        ))}
+                      </div>
+                      <span className="text-xs font-semibold text-indigo-200">Speaking...</span>
+                      <span className="text-[10px] text-indigo-300/80">Tap to Interrupt</span>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-400 mb-1 animate-pulse">
+                        <Mic className="w-5 h-5" />
+                      </div>
+                      <span className="text-xs font-semibold text-amber-200">Listening...</span>
+                      <span className="text-[10px] text-stone-400">Speak openly</span>
+                    </>
+                  )}
+                </div>
+              </button>
+            </div>
+
+            {/* Live Subtitle Focus HUD (Permanently visible and doesn't abruptly vanish) */}
+            <div id="live-subtitle-hud" className="w-full max-w-lg mt-3 px-4 py-2.5 rounded-xl bg-stone-50/90 border border-stone-200/80 text-center min-h-[46px] flex items-center justify-center">
+              {activeUserLiveText ? (
+                <p className="text-xs sm:text-sm text-amber-950 font-medium animate-in fade-in duration-150">
+                  <span className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider mr-1.5">You:</span>
+                  "{activeUserLiveText}"
+                </p>
+              ) : activeModelLiveText ? (
+                <p className="text-xs sm:text-sm text-stone-800 font-serif italic animate-in fade-in duration-150">
+                  <span className="text-[11px] font-sans font-semibold text-indigo-600 uppercase tracking-wider not-italic mr-1.5">{selectedVoice}:</span>
+                  "{activeModelLiveText}"
+                </p>
+              ) : lastCompletedUtterance ? (
+                <p className="text-xs text-stone-600">
+                  <span className="text-[10px] font-semibold text-stone-400 uppercase mr-1">Last {lastCompletedUtterance.role === 'user' ? 'thought' : 'reflection'}:</span>
+                  <span className="font-serif italic text-stone-700">"{lastCompletedUtterance.text.slice(0, 110)}{lastCompletedUtterance.text.length > 110 ? '...' : ''}"</span>
+                </p>
+              ) : (
+                <p className="text-xs text-stone-400 font-serif italic">
+                  "Speak your reflections or questions naturally. MindMirror responds with mindful clarity."
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Real-Time Live Dialogue Stream (The conversational back-and-forth) */}
+          <div className="flex-1 mt-4 flex flex-col border-t border-stone-100 pt-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-stone-700">
+                <MessageSquare className="w-3.5 h-3.5 text-amber-600" />
+                <span>Live Dialogue Stream</span>
+                {dialogueItems.length > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-stone-100 text-stone-600 text-[10px]">
+                    {dialogueItems.length} turns
+                  </span>
+                )}
+              </div>
+              {dialogueItems.length > 0 && (
+                <button
+                  onClick={() => setDialogueItems([])}
+                  className="text-[11px] text-stone-400 hover:text-stone-600 flex items-center gap-1"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  Clear Stream
+                </button>
+              )}
+            </div>
+
+            {/* Scrollable Message Box */}
+            <div 
+              id="live-dialogue-scrollbox"
+              className="flex-1 overflow-y-auto max-h-[320px] sm:max-h-[360px] space-y-3 pr-1 py-1"
+            >
+              {dialogueItems.length === 0 && !activeUserLiveText && !activeModelLiveText ? (
+                <div className="h-40 flex flex-col items-center justify-center text-center p-4 rounded-xl bg-stone-50/50 border border-dashed border-stone-200">
+                  <Sparkles className="w-6 h-6 text-amber-400 mb-1.5" />
+                  <p className="text-xs font-medium text-stone-700">Voice dialogue will stream here in real time</p>
+                  <p className="text-[11px] text-stone-400 mt-0.5 max-w-xs">
+                    Begin speaking or select one of the cognitive starters on the right to initiate inquiry.
+                  </p>
+                </div>
+              ) : (
                 <>
-                  <button
-                    type="button"
-                    onClick={handleCopyTranscript}
-                    className="p-1.5 text-stone-500 hover:text-stone-800 rounded-lg hover:bg-stone-200/60 text-xs flex items-center gap-1 cursor-pointer transition"
-                    title="Copy Transcript"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                    <span className="text-[10px] font-mono">{copiedTranscript ? 'Copied!' : 'Copy'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleClearTranscript}
-                    className="p-1.5 text-stone-500 hover:text-stone-800 rounded-lg hover:bg-stone-200/60 text-xs flex items-center gap-1 cursor-pointer transition"
-                    title="Clear Transcript"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span className="text-[10px] font-mono">Clear</span>
-                  </button>
+                  {dialogueItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`flex flex-col rounded-xl p-3 text-xs sm:text-sm transition-all ${
+                        item.role === 'user'
+                          ? 'bg-amber-50/70 border border-amber-200/70 text-amber-950 ml-4'
+                          : 'bg-stone-50 border border-stone-200/80 text-stone-900 mr-4'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-semibold text-[11px] flex items-center gap-1 text-stone-600">
+                          {item.role === 'user' ? (
+                            <>
+                              <User className="w-3 h-3 text-amber-600" />
+                              {user.displayName || 'You'}
+                            </>
+                          ) : (
+                            <>
+                              <Bot className="w-3 h-3 text-indigo-600" />
+                              MindMirror ({selectedVoice})
+                            </>
+                          )}
+                        </span>
+                        <span className="text-[10px] text-stone-400">{item.timestamp}</span>
+                      </div>
+                      <p className={`leading-relaxed ${item.role === 'model' ? 'font-serif text-[13px] sm:text-[14px]' : 'font-sans'}`}>
+                        {item.text}
+                      </p>
+                    </div>
+                  ))}
+
+                  {/* Active In-Flight User Stream Card */}
+                  {activeUserLiveText && (
+                    <div className="flex flex-col rounded-xl p-3 bg-amber-50 border border-amber-300 text-amber-950 ml-4 animate-in fade-in duration-100">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-semibold text-[11px] flex items-center gap-1 text-amber-800">
+                          <User className="w-3 h-3 text-amber-600" />
+                          {user.displayName || 'You'} (Speaking...)
+                        </span>
+                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                      </div>
+                      <p className="text-xs sm:text-sm font-sans leading-relaxed">{activeUserLiveText}</p>
+                    </div>
+                  )}
+
+                  {/* Active In-Flight Model Stream Card */}
+                  {activeModelLiveText && (
+                    <div className="flex flex-col rounded-xl p-3 bg-stone-50 border border-indigo-200 text-stone-900 mr-4 animate-in fade-in duration-100">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-semibold text-[11px] flex items-center gap-1 text-indigo-700">
+                          <Bot className="w-3 h-3 text-indigo-600" />
+                          MindMirror ({selectedVoice}) (Reflecting...)
+                        </span>
+                        <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
+                      </div>
+                      <p className="font-serif text-[13px] sm:text-[14px] leading-relaxed">{activeModelLiveText}</p>
+                    </div>
+                  )}
+                  <div ref={dialogueEndRef} />
                 </>
               )}
-              <button
-                type="button"
-                onClick={() => setShowTranscriptDrawer(false)}
-                className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 text-xs font-mono font-bold cursor-pointer transition"
-              >
-                ✕
-              </button>
             </div>
           </div>
 
-          {/* Transcript Message Feed */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-stone-50/40">
-            {transcriptHistory.length === 0 && !currentInterimUserText && !currentStreamingModelText && (
-              <div className="h-full flex flex-col items-center justify-center text-center p-6 text-stone-400 space-y-2">
-                <Radio className="w-8 h-8 opacity-40 text-stone-500" />
-                <p className="text-xs font-sans">
-                  Spoken dialogue and reflections will appear here in real-time.
-                </p>
-              </div>
-            )}
-
-            {transcriptHistory.map((item) => (
-              <div
-                key={item.id}
-                className={`p-3.5 rounded-2xl text-xs space-y-1 ${
-                  item.role === 'user'
-                    ? 'bg-amber-50/90 border border-amber-200/90 text-stone-900 ml-4 shadow-2xs'
-                    : 'bg-white border border-stone-200 text-stone-800 mr-4 shadow-xs'
-                }`}
+          {/* Floating Control Bar at Bottom */}
+          <div id="live-bottom-dock" className="mt-4 pt-3 border-t border-stone-100 flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              {/* Mic Mute Toggle */}
+              <button
+                id="toggle-mic-mute-btn"
+                onClick={() => setIsMuted(!isMuted)}
+                disabled={state === 'idle'}
+                className={`p-2 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition-colors ${
+                  isMuted
+                    ? 'bg-rose-50 border-rose-200 text-rose-700'
+                    : 'bg-white border-stone-200 text-stone-700 hover:bg-stone-50'
+                } disabled:opacity-50`}
+                title={isMuted ? 'Unmute Microphone' : 'Mute Microphone'}
               >
-                <div className="flex items-center justify-between text-[10px] text-stone-400 font-mono">
-                  <span className="font-semibold text-stone-700">
-                    {item.role === 'user' ? (user.displayName || 'You') : `MindMirror (${selectedVoice})`}
-                  </span>
-                  <span>{item.timestamp}</span>
-                </div>
-                <p className="font-sans leading-relaxed text-stone-800">
-                  {item.text}
-                </p>
-              </div>
-            ))}
+                {isMuted ? <MicOff className="w-4 h-4 text-rose-600" /> : <Mic className="w-4 h-4 text-stone-600" />}
+                <span className="text-[11px]">{isMuted ? 'Muted' : 'Mic Active'}</span>
+              </button>
 
-            {/* Active Streaming Turn Previews */}
-            {currentInterimUserText && (
-              <div className="p-3.5 rounded-2xl text-xs bg-amber-100/70 border border-amber-300 text-stone-900 ml-4 animate-pulse">
-                <span className="text-[10px] font-mono text-amber-800 font-semibold block mb-0.5">
-                  Speaking now...
-                </span>
-                <p className="font-sans italic">{currentInterimUserText}</p>
-              </div>
-            )}
+              {/* Speaker Mute Toggle */}
+              <button
+                id="toggle-speaker-mute-btn"
+                onClick={() => setIsSpeakerMuted(!isSpeakerMuted)}
+                className={`p-2 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition-colors ${
+                  isSpeakerMuted
+                    ? 'bg-rose-50 border-rose-200 text-rose-700'
+                    : 'bg-white border-stone-200 text-stone-700 hover:bg-stone-50'
+                }`}
+                title={isSpeakerMuted ? 'Unmute Speaker Output' : 'Mute Speaker Output'}
+              >
+                {isSpeakerMuted ? <VolumeX className="w-4 h-4 text-rose-600" /> : <Volume2 className="w-4 h-4 text-stone-600" />}
+                <span className="text-[11px]">{isSpeakerMuted ? 'Audio Off' : 'Speaker'}</span>
+              </button>
 
-            {currentStreamingModelText && (
-              <div className="p-3.5 rounded-2xl text-xs bg-indigo-50/90 border border-indigo-200 text-stone-800 mr-4 animate-pulse">
-                <span className="text-[10px] font-mono text-indigo-800 font-semibold block mb-0.5">
-                  MindMirror Reflecting...
-                </span>
-                <p className="font-serif italic">{currentStreamingModelText}</p>
-              </div>
-            )}
+              {/* Barge-In / Interrupt Trigger */}
+              {state === 'speaking' && (
+                <button
+                  id="barge-in-interrupt-btn"
+                  onClick={handleManualInterrupt}
+                  className="px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-semibold hover:bg-indigo-100 transition-colors animate-pulse"
+                >
+                  Interrupt AI
+                </button>
+              )}
+            </div>
 
-            <div ref={transcriptBottomRef} />
+            {/* End / Start Session Trigger */}
+            <div>
+              {state !== 'idle' ? (
+                <button
+                  id="end-live-session-btn"
+                  onClick={endLiveSession}
+                  className="px-4 py-1.5 rounded-lg bg-stone-900 hover:bg-stone-800 text-white text-xs font-medium flex items-center gap-1.5 shadow-xs transition-colors"
+                >
+                  <Power className="w-3.5 h-3.5 text-rose-400" />
+                  <span>End Session</span>
+                </button>
+              ) : (
+                <button
+                  id="start-live-session-btn"
+                  onClick={() => startLiveSession()}
+                  className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors"
+                >
+                  <Mic className="w-3.5 h-3.5" />
+                  <span>Start Voice Session</span>
+                </button>
+              )}
+            </div>
           </div>
-        </aside>
-      )}
+        </div>
+
+        {/* Right Column: Cognitive Workspace Intelligence & Grounding Deck (5 cols) */}
+        <div id="live-grounding-column" className="lg:col-span-5 flex flex-col gap-4">
+          
+          {/* Card 1: Live Cognitive Grounding Status */}
+          <div className="bg-white rounded-2xl border border-stone-200/90 shadow-sm p-4 sm:p-5">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+              <div className="flex items-center gap-2">
+                <Brain className="w-4 h-4 text-amber-600" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-stone-800">
+                  Cognitive Grounding Deck
+                </h3>
+              </div>
+              <span className="text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-medium flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                Active Workspace
+              </span>
+            </div>
+
+            <div className="mt-3 space-y-3">
+              {/* Document Grounding Selector */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="grounding-document-select" className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider block">
+                    Ground in Document Intelligence:
+                  </label>
+                  {selectedDocId && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDocId(null)}
+                      className="text-[10px] text-stone-400 hover:text-stone-600 transition cursor-pointer"
+                    >
+                      Clear document
+                    </button>
+                  )}
+                </div>
+
+                {docsLoading ? (
+                  <div className="text-xs text-stone-400 italic">Loading workspace documents...</div>
+                ) : userDocuments.length > 0 ? (
+                  <>
+                    <select
+                      id="grounding-document-select"
+                      value={selectedDocId || ''}
+                      onChange={(e) => setSelectedDocId(e.target.value || null)}
+                      className="w-full text-xs bg-stone-50 border border-stone-200 rounded-lg p-2 text-stone-800 focus:ring-1 focus:ring-amber-500 font-medium"
+                    >
+                      <option value="">No document (General Reflection)</option>
+                      {userDocuments.map((doc) => (
+                        <option key={doc.id} value={doc.id}>
+                          📄 {doc.fileName} ({doc.pageCount || 1} pgs{doc.chunkCount ? ` • ${doc.chunkCount} chunks` : ''})
+                        </option>
+                      ))}
+                    </select>
+
+                    {/* Active Grounded Document Summary Card & Context Indicator */}
+                    {activeDoc && (
+                      <div id="active-grounding-doc-card" className="p-3 bg-stone-50/90 rounded-xl border border-stone-200/90 space-y-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2.5 min-w-0">
+                            <div className="w-8 h-8 rounded-lg bg-amber-100/90 border border-amber-200/80 text-amber-900 flex items-center justify-center shrink-0 mt-0.5">
+                              <FileText className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-serif font-bold text-stone-900 truncate leading-snug" title={activeDoc.fileName}>
+                                {activeDoc.fileName}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5 text-[10px] font-mono text-stone-500">
+                                <span>{activeDoc.pageCount || 1} {(activeDoc.pageCount || 1) === 1 ? 'page' : 'pages'}</span>
+                                <span>•</span>
+                                <span>{activeDoc.chunkCount || selectedDocChunks.length || 0} chunks</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Indexed Badge */}
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-medium bg-emerald-50 text-emerald-800 border border-emerald-200 shrink-0">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            <span>Indexed</span>
+                          </span>
+                        </div>
+
+                        {/* Context Indicator (Requirement 5) */}
+                        <div className="pt-2 border-t border-stone-200/60 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 text-[11px] text-stone-600 font-medium">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 animate-pulse"></span>
+                            <span>Conversation grounded in this document</span>
+                          </div>
+                          {selectedDocChunks.length > 0 && (
+                            <span className="text-[10px] font-mono text-emerald-700 font-medium shrink-0">
+                              {selectedDocChunks.length} sections ready
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="text-xs text-stone-500 bg-stone-50 p-2.5 rounded-lg border border-stone-200 flex items-center justify-between">
+                    <span>No uploaded PDFs in workspace yet.</span>
+                    {onNavigate && (
+                      <button
+                        onClick={() => onNavigate('/documents')}
+                        className="text-amber-700 font-semibold hover:underline cursor-pointer"
+                      >
+                        Upload PDF →
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Connected Memory & Long-Term Pattern Anchors */}
+              <div className="pt-2 border-t border-stone-100">
+                <div className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-1.5">
+                  Synchronized Cognitive Memory:
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="p-2 rounded-lg bg-stone-50 border border-stone-200/80">
+                    <span className="text-[10px] font-semibold text-stone-400 block">Reflections Archive</span>
+                    <span className="font-bold text-stone-800">{entries.length} Saved Entries</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-stone-50 border border-stone-200/80">
+                    <span className="text-[10px] font-semibold text-stone-400 block">Dominant Focus</span>
+                    <span className="font-bold text-stone-800 truncate block">
+                      {cognitivePatterns?.recurringGoals?.[0] || 'Mindful Clarity'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 2: Cognitive Inquiry Starters */}
+          <div className="bg-white rounded-2xl border border-stone-200/90 shadow-sm p-4 sm:p-5 flex-1">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+              <div className="flex items-center gap-2">
+                <Compass className="w-4 h-4 text-amber-600" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-stone-800">
+                  Inquiry Starters
+                </h3>
+              </div>
+              <span className="text-[10px] text-stone-400">Click to ask live</span>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              {INQUIRY_STARTERS.map((starter, idx) => {
+                const IconComponent = starter.icon;
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      if (state === 'idle' || state === 'error') {
+                        startLiveSession(starter.prompt);
+                      } else if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                        const nowStamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        setDialogueItems((prev) => [
+                          ...prev,
+                          {
+                            id: 'usr_' + Date.now(),
+                            role: 'user',
+                            text: starter.prompt,
+                            timestamp: nowStamp
+                          }
+                        ]);
+                        setLastCompletedUtterance({ role: 'user', text: starter.prompt });
+                        wsRef.current.send(JSON.stringify({ type: 'text', text: starter.prompt }));
+                      }
+                    }}
+                    className="w-full text-left p-2.5 rounded-xl border border-stone-200/90 hover:border-amber-300 hover:bg-amber-50/50 transition-all group flex items-start justify-between"
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-7 h-7 rounded-lg bg-stone-100 group-hover:bg-amber-100 flex items-center justify-center text-stone-600 group-hover:text-amber-700 shrink-0 transition-colors mt-0.5">
+                        <IconComponent className="w-3.5 h-3.5" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold text-stone-800 group-hover:text-amber-950">
+                          {starter.title}
+                        </div>
+                        <p className="text-[11px] text-stone-500 line-clamp-1 mt-0.5">
+                          {starter.prompt}
+                        </p>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-stone-300 group-hover:text-amber-600 shrink-0 mt-1 transition-transform group-hover:translate-x-0.5" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Card 3: Live Extracted Takeaways & Action Items */}
+          <div className="bg-white rounded-2xl border border-stone-200/90 shadow-sm p-4 sm:p-5">
+            <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-600" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-stone-800">
+                  Live Synthesized Takeaways
+                </h3>
+              </div>
+              {extractedTakeaways.length > 0 && (
+                <span className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full font-semibold">
+                  {extractedTakeaways.length} Key Points
+                </span>
+              )}
+            </div>
+
+            <div className="mt-3">
+              {extractedTakeaways.length === 0 ? (
+                <p className="text-xs text-stone-400 italic py-2">
+                  As you speak with MindMirror, key reflections and realizations will distill here automatically.
+                </p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {extractedTakeaways.map((takeaway, index) => (
+                    <li key={index} className="text-xs text-stone-700 bg-stone-50 p-2 rounded-lg border border-stone-200/70 flex items-start gap-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                      <span className="leading-snug font-serif italic text-stone-800">{takeaway}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
     </div>
   );
 };

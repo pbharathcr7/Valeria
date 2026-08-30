@@ -72,12 +72,21 @@ export default function App() {
   };
 
   const [currentPath, setCurrentPath] = useState<string>(getInitialPath());
+  const [livePreselectedDocId, setLivePreselectedDocId] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('docId');
+  });
 
   // Listen to browser forward/backward navigation
   useEffect(() => {
     const handlePopState = () => {
       const path = window.location.pathname;
       const validPaths = ['/dashboard', '/reflections', '/memory', '/weekly-insights', '/live', '/documents', '/calendar', '/settings'];
+      const params = new URLSearchParams(window.location.search);
+      const docId = params.get('docId');
+      if (docId) {
+        setLivePreselectedDocId(docId);
+      }
       if (validPaths.includes(path)) {
         setCurrentPath(path);
       } else {
@@ -91,8 +100,18 @@ export default function App() {
 
   // Safe navigation function updating state & history API
   const handleNavigate = (path: string) => {
-    setCurrentPath(path);
-    if (window.location.pathname !== path) {
+    const basePath = path.split('?')[0];
+    const queryPart = path.includes('?') ? path.split('?')[1] : '';
+    const params = new URLSearchParams(queryPart);
+    const docId = params.get('docId');
+    if (docId) {
+      setLivePreselectedDocId(docId);
+    } else if (basePath !== '/live') {
+      setLivePreselectedDocId(null);
+    }
+
+    setCurrentPath(basePath);
+    if (window.location.pathname + window.location.search !== path) {
       window.history.pushState({}, '', path);
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -532,7 +551,12 @@ export default function App() {
             return (
               <LivePage
                 user={currentUser}
+                entries={entries}
+                cognitivePatterns={cognitivePatterns}
+                initialDocId={livePreselectedDocId}
                 onNavigate={handleNavigate}
+                onNewReflection={handleStartNewReflection}
+                onRefreshEntries={() => currentUser && loadUserEntries(currentUser.uid)}
               />
             );
 
@@ -541,6 +565,7 @@ export default function App() {
               <DocumentsPage
                 user={currentUser}
                 onNewReflection={handleStartNewReflection}
+                onNavigate={handleNavigate}
               />
             );
 

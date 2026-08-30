@@ -14,7 +14,8 @@ import {
   AlertTriangle,
   Plus,
   MessageSquare,
-  Sparkles
+  Sparkles,
+  Mic
 } from 'lucide-react';
 import { UserProfile, DocumentItem, ReflectionIntent } from '../types';
 import { 
@@ -28,9 +29,10 @@ import { DocumentChatCanvas } from '../components/DocumentChatCanvas';
 interface DocumentsPageProps {
   user: UserProfile;
   onNewReflection?: (intent?: ReflectionIntent) => void;
+  onNavigate?: (path: string) => void;
 }
 
-export const DocumentsPage: React.FC<DocumentsPageProps> = ({ user, onNewReflection }) => {
+export const DocumentsPage: React.FC<DocumentsPageProps> = ({ user, onNewReflection, onNavigate }) => {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isUploading, setIsUploading] = useState<boolean>(false);
@@ -487,45 +489,31 @@ export const DocumentsPage: React.FC<DocumentsPageProps> = ({ user, onNewReflect
                   </div>
 
                   {/* Card Bottom: Metadata & Status / Action Row */}
-                  <div className="pt-3 border-t border-stone-100 flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <div className="flex items-center gap-1.5 text-[11px] font-mono text-stone-400">
-                      <Clock className="w-3 h-3" />
-                      <span>{formatDate(doc.uploadedAt || doc.createdAt)}</span>
-                    </div>
-
+                  <div className="pt-3 border-t border-stone-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
                     <div className="flex items-center gap-2">
-                      {/* Ask this PDF Button for indexed documents */}
-                      {doc.status === 'indexed' && (
-                        <button
-                          type="button"
-                          id={`ask-pdf-btn-${doc.id}`}
-                          onClick={() => setActiveChatDocument(doc)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 active:scale-[0.98] text-stone-50 text-xs font-medium transition cursor-pointer shadow-2xs group"
-                          title={`Ask ${doc.fileName}`}
-                        >
-                          <MessageSquare className="w-3.5 h-3.5 text-amber-300 group-hover:scale-110 transition-transform" />
-                          <span>Ask this PDF</span>
-                        </button>
-                      )}
+                      <div className="flex items-center gap-1.5 text-[11px] font-mono text-stone-400">
+                        <Clock className="w-3 h-3" />
+                        <span>{formatDate(doc.uploadedAt || doc.createdAt)}</span>
+                      </div>
 
                       {/* Status Badge */}
                       <div>
                         {doc.status === 'indexed' && (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-mono font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
                             <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                             <span>Indexed</span>
                           </span>
                         )}
 
                         {doc.status === 'processing' && (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-mono font-medium bg-amber-50 text-amber-900 border border-amber-200">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-medium bg-amber-50 text-amber-900 border border-amber-200">
                             <Loader2 className="w-3 h-3 animate-spin text-amber-700" />
                             <span>Processing</span>
                           </span>
                         )}
 
                         {doc.status === 'uploading' && (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-mono font-medium bg-stone-100 text-stone-800 border border-stone-200">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-medium bg-stone-100 text-stone-800 border border-stone-200">
                             <Loader2 className="w-3 h-3 animate-spin text-stone-600" />
                             <span>Uploading</span>
                           </span>
@@ -533,7 +521,7 @@ export const DocumentsPage: React.FC<DocumentsPageProps> = ({ user, onNewReflect
 
                         {doc.status === 'failed' && (
                           <span 
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-mono font-medium bg-rose-50 text-rose-800 border border-rose-200"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-medium bg-rose-50 text-rose-800 border border-rose-200"
                             title={doc.errorMessage || 'Processing failed'}
                           >
                             <AlertTriangle className="w-3 h-3 text-rose-600" />
@@ -542,6 +530,35 @@ export const DocumentsPage: React.FC<DocumentsPageProps> = ({ user, onNewReflect
                         )}
                       </div>
                     </div>
+
+                    {/* Action CTAs for indexed documents */}
+                    {doc.status === 'indexed' && (
+                      <div className="flex items-center gap-2">
+                        {/* Secondary Action: Ask this PDF */}
+                        <button
+                          type="button"
+                          id={`ask-pdf-btn-${doc.id}`}
+                          onClick={() => setActiveChatDocument(doc)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200 active:scale-[0.98] text-stone-700 hover:text-stone-900 text-xs font-medium border border-stone-200 transition cursor-pointer group"
+                          title={`Chat with ${doc.fileName}`}
+                        >
+                          <MessageSquare className="w-3.5 h-3.5 text-stone-500 group-hover:text-stone-800 transition-colors" />
+                          <span>Ask this PDF</span>
+                        </button>
+
+                        {/* Primary Action: Use in Voice Conversation */}
+                        <button
+                          type="button"
+                          id={`use-in-voice-btn-${doc.id}`}
+                          onClick={() => onNavigate?.(`/live?docId=${doc.id}`)}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-[0.98] text-stone-950 text-xs font-semibold transition cursor-pointer shadow-xs group"
+                          title={`Start live voice conversation grounded in ${doc.fileName}`}
+                        >
+                          <Mic className="w-3.5 h-3.5 text-stone-950 group-hover:scale-110 transition-transform" />
+                          <span>Use in Voice Conversation</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               );

@@ -175,7 +175,16 @@ export interface LiveTranscriptItem {
   role: 'user' | 'model';
   text: string;
   timestamp: string;
+  isStreaming?: boolean;
   isInterrupted?: boolean;
+}
+
+export interface LiveCognitiveAnchor {
+  id: string;
+  type: 'memory' | 'document' | 'schedule' | 'pattern';
+  title: string;
+  subtitle?: string;
+  detail?: string;
 }
 
 

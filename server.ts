@@ -1090,7 +1090,7 @@ async function start() {
       }
     };
 
-    const initLiveSession = async (voiceName: string = 'Zephyr') => {
+    const initLiveSession = async (voiceName: string = 'Zephyr', groundingContext: string = '') => {
       if (isClosed || ws.readyState !== WebSocket.OPEN) return;
       try {
         closeLiveSession();
@@ -1106,22 +1106,44 @@ async function start() {
         const ai = getGeminiClient();
         console.log(`MindMirror Live: Initializing Gemini Live session with voice: ${voiceName}`);
 
+        let dynamicSystemInstruction = "You are MindMirror Live, a calm, mindful, and insightful AI voice companion in a personal cognitive workspace. You speak with natural warmth, active listening, and succinct elegance. Keep your responses conversational, natural, and concise (typically 1 to 3 sentences) suited for spoken dialogue. Help the user explore thoughts, emotional states, cognitive clarity, daily reflections, decisions, and connected ideas across their memories and workspace.";
+        
+        if (groundingContext && typeof groundingContext === 'string' && groundingContext.trim()) {
+          dynamicSystemInstruction += `\n\n=== USER COGNITIVE WORKSPACE GROUNDING ===\n${groundingContext.trim()}\n==========================================\nGround your insights naturally in this workspace context when relevant to the conversation.`;
+        }
+
         liveSession = await ai.live.connect({
           model: 'gemini-3.1-flash-live-preview',
           callbacks: {
             onmessage: (msg: any) => {
               if (isClosed || ws.readyState !== WebSocket.OPEN) return;
 
-              // 1. Forward model audio chunks
-              const audioData = msg.data || msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-              if (audioData) {
-                safeSend({ type: 'audio', audio: audioData });
+              // 1. Forward model audio chunks and any direct text from parts
+              let forwardedPartText = false;
+              if (msg.serverContent?.modelTurn?.parts) {
+                for (const part of msg.serverContent.modelTurn.parts) {
+                  if (part.inlineData?.data) {
+                    safeSend({ type: 'audio', audio: part.inlineData.data });
+                  }
+                  if (part.text) {
+                    safeSend({ type: 'model_transcript_chunk', text: part.text });
+                    forwardedPartText = true;
+                  }
+                }
+              } else {
+                if (msg.data) {
+                  safeSend({ type: 'audio', audio: msg.data });
+                }
+                if (msg.text) {
+                  safeSend({ type: 'model_transcript_chunk', text: msg.text });
+                  forwardedPartText = true;
+                }
               }
 
-              // 2. Forward model text chunks
-              const text = msg.text || msg.serverContent?.modelTurn?.parts?.[0]?.text;
-              if (text) {
-                safeSend({ type: 'model_transcript_chunk', text });
+              // 2. Real-time audio output transcription chunk (word-by-word streaming text for spoken audio)
+              const outputTranscriptionText = msg.serverContent?.outputTranscription?.text;
+              if (outputTranscriptionText && !forwardedPartText) {
+                safeSend({ type: 'model_transcript_chunk', text: outputTranscriptionText });
               }
 
               // 3. User spoken input transcription
@@ -1130,25 +1152,14 @@ async function start() {
                 safeSend({ type: 'user_transcript', text: userTranscript });
               }
 
-              // 4. Model output transcription
-              const modelTranscript = msg.serverContent?.outputTranscription?.text;
-              if (modelTranscript) {
-                safeSend({ type: 'model_transcript', text: modelTranscript });
-              }
-
-              // 5. Interrupted flag
+              // 4. Interrupted flag
               if (msg.serverContent?.interrupted) {
                 safeSend({ type: 'interrupted' });
               }
 
-              // 6. Turn complete
+              // 5. Turn complete (Single authoritative turn settlement)
               if (msg.serverContent?.turnComplete) {
                 safeSend({ type: 'turn_complete' });
-              }
-
-              // 7. Generation complete
-              if (msg.serverContent?.generationComplete) {
-                safeSend({ type: 'generation_complete' });
               }
             },
             onclose: (e: any) => {
@@ -1176,7 +1187,7 @@ async function start() {
             systemInstruction: {
               parts: [
                 {
-                  text: "You are MindMirror Live, a calm, mindful, and insightful AI voice companion for real-time reflection and conversational clarity. You speak with natural warmth, active listening, and succinct elegance. Keep your responses conversational, natural, and concise (typically 1 to 3 sentences) suited for spoken dialogue. Help the user explore thoughts, emotional states, cognitive clarity, and daily reflections."
+                  text: dynamicSystemInstruction
                 }
               ]
             },
@@ -1202,7 +1213,8 @@ async function start() {
         const message = JSON.parse(data.toString());
         if (message.type === 'setup') {
           const requestedVoice = message.voiceName || 'Zephyr';
-          await initLiveSession(requestedVoice);
+          const groundingContext = message.groundingContext || '';
+          await initLiveSession(requestedVoice, groundingContext);
         } else if (message.type === 'realtime_input' && message.audio) {
           if (liveSession) {
             try {
