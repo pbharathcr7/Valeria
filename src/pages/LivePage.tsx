@@ -51,6 +51,7 @@ import {
   loadUserDocuments,
   loadDocumentChunks 
 } from '../lib/firebase';
+import { GeminiAuroraOrb } from '../components/GeminiAuroraOrb';
 
 interface LivePageProps {
   user: UserProfile;
@@ -202,6 +203,13 @@ export const LivePage: React.FC<LivePageProps> = ({
   const scheduledAudioNodesRef = useRef<AudioBufferSourceNode[]>([]);
   const nextPlayTimeRef = useRef<number>(0);
 
+  // Live model speech-to-text timing synchronization refs
+  const modelTurnFullTextRef = useRef<string>('');
+  const modelSpokenTextRef = useRef<string>('');
+  const turnAudioStartTimeRef = useRef<number>(0);
+  const turnAudioTotalDurationRef = useRef<number>(0);
+  const revealedWordsCountRef = useRef<number>(0);
+
   const isMutedRef = useRef<boolean>(false);
   const isSpeakerMutedRef = useRef<boolean>(false);
   const isSessionActiveRef = useRef<boolean>(false);
@@ -349,13 +357,39 @@ export const LivePage: React.FC<LivePageProps> = ({
     return parts.join('\n');
   };
 
-  // Visualizer loop for model playback volume & fluid harmonics
+  // Visualizer loop for model playback volume, fluid harmonics & speech-synced text pacing
   const startVisualizerLoop = () => {
     const updateLevels = () => {
       if (!isSessionActiveRef.current) {
         setWaveFrequencies([0.15, 0.25, 0.4, 0.6, 0.4, 0.25, 0.15]);
         setPlaybackVolume(0);
         return;
+      }
+
+      // Synchronize live speech words progressive revelation with audio playback
+      if (state === 'speaking' || scheduledAudioNodesRef.current.length > 0) {
+        if (playbackAudioContextRef.current && turnAudioTotalDurationRef.current > 0) {
+          const audioCtx = playbackAudioContextRef.current;
+          const elapsed = Math.max(0, audioCtx.currentTime - turnAudioStartTimeRef.current);
+          const totalDuration = Math.max(0.4, turnAudioTotalDurationRef.current);
+          // Calculate progress ratio (0.0 -> 1.0)
+          const progress = Math.min(1, Math.max(0, elapsed / totalDuration));
+
+          const fullText = modelTurnFullTextRef.current.trim();
+          if (fullText) {
+            const words = fullText.split(/\s+/).filter(Boolean);
+            if (words.length > 0) {
+              // Word pacing synchronized to human spoken cadence
+              const targetCount = Math.min(words.length, Math.max(1, Math.ceil(progress * words.length)));
+              if (targetCount > revealedWordsCountRef.current) {
+                revealedWordsCountRef.current = targetCount;
+                const currentSpoken = words.slice(0, targetCount).join(' ');
+                modelSpokenTextRef.current = currentSpoken;
+                setActiveModelLiveText(currentSpoken);
+              }
+            }
+          }
+        }
       }
 
       if (playbackAnalyserRef.current && state === 'speaking') {
@@ -402,7 +436,7 @@ export const LivePage: React.FC<LivePageProps> = ({
     animationFrameRef.current = requestAnimationFrame(updateLevels);
   };
 
-  // Stop active scheduled audio playback
+  // Stop active scheduled audio playback & commit partial speech safely
   const stopAllPlayback = () => {
     try {
       scheduledAudioNodesRef.current.forEach((node) => {
@@ -415,6 +449,35 @@ export const LivePage: React.FC<LivePageProps> = ({
       });
       scheduledAudioNodesRef.current = [];
       nextPlayTimeRef.current = 0;
+      turnAudioTotalDurationRef.current = 0;
+
+      // If speech was interrupted in-flight, commit whatever text was actually spoken
+      const spokenSoFar = modelSpokenTextRef.current.trim() || activeModelLiveText.trim();
+      if (spokenSoFar) {
+        const nowStamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setDialogueItems((prev) => {
+          const lastItem = prev[prev.length - 1];
+          if (lastItem && lastItem.role === 'model' && lastItem.text === spokenSoFar) {
+            return prev;
+          }
+          return [
+            ...prev,
+            {
+              id: 'mod_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+              role: 'model',
+              text: spokenSoFar,
+              timestamp: nowStamp
+            }
+          ];
+        });
+        setLastCompletedUtterance({ role: 'model', text: spokenSoFar });
+      }
+
+      setActiveModelLiveText('');
+      modelTurnFullTextRef.current = '';
+      modelSpokenTextRef.current = '';
+      revealedWordsCountRef.current = 0;
+
       if (playbackGainNodeRef.current && playbackAudioContextRef.current) {
         playbackGainNodeRef.current.gain.setValueAtTime(0, playbackAudioContextRef.current.currentTime);
         playbackGainNodeRef.current.gain.setValueAtTime(isSpeakerMutedRef.current ? 0 : 1, playbackAudioContextRef.current.currentTime + 0.05);
@@ -424,7 +487,7 @@ export const LivePage: React.FC<LivePageProps> = ({
     }
   };
 
-  // Convert raw 24kHz linear PCM base64 string to AudioBuffer with glitch-free playback
+  // Convert raw 24kHz linear PCM base64 string to AudioBuffer with glitch-free playback and synchronous word tracking
   const playAudioChunk = (base64Audio: string) => {
     if (isSpeakerMutedRef.current) return;
 
@@ -488,11 +551,19 @@ export const LivePage: React.FC<LivePageProps> = ({
       source.buffer = audioBuffer;
       source.connect(playbackGainNodeRef.current);
 
+      // If starting fresh model utterance sequence, calibrate turn timeline
+      if (scheduledAudioNodesRef.current.length === 0) {
+        turnAudioStartTimeRef.current = audioCtx.currentTime;
+        turnAudioTotalDurationRef.current = 0;
+        revealedWordsCountRef.current = 0;
+      }
+
       // Schedule gapless playback with jitter lookahead buffer
       const currentTime = audioCtx.currentTime;
       const startTime = Math.max(currentTime + 0.01, nextPlayTimeRef.current);
       source.start(startTime);
       nextPlayTimeRef.current = startTime + audioBuffer.duration;
+      turnAudioTotalDurationRef.current += audioBuffer.duration;
 
       scheduledAudioNodesRef.current.push(source);
       source.onended = () => {
@@ -501,6 +572,44 @@ export const LivePage: React.FC<LivePageProps> = ({
           scheduledAudioNodesRef.current.splice(index, 1);
         }
         if (scheduledAudioNodesRef.current.length === 0 && isSessionActiveRef.current) {
+          // Finalize speech: reveal 100% of accumulated turn text and commit to dialogue stream
+          const finalText = modelTurnFullTextRef.current.trim() || modelSpokenTextRef.current.trim();
+          if (finalText) {
+            const nowStamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            setDialogueItems((prev) => {
+              const lastItem = prev[prev.length - 1];
+              if (lastItem && lastItem.role === 'model' && lastItem.text === finalText) {
+                return prev;
+              }
+              return [
+                ...prev,
+                {
+                  id: 'mod_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+                  role: 'model',
+                  text: finalText,
+                  timestamp: nowStamp
+                }
+              ];
+            });
+            setLastCompletedUtterance({ role: 'model', text: finalText });
+
+            // Synthesize extracted takeaways for the right deck
+            if (finalText.length > 40) {
+              setExtractedTakeaways((prev) => {
+                const snippet = finalText.split(/[.!?]/)[0].trim();
+                if (snippet && snippet.length > 15 && !prev.includes(snippet)) {
+                  return [...prev.slice(-3), snippet];
+                }
+                return prev;
+              });
+            }
+          }
+
+          setActiveModelLiveText('');
+          modelTurnFullTextRef.current = '';
+          modelSpokenTextRef.current = '';
+          revealedWordsCountRef.current = 0;
+          turnAudioTotalDurationRef.current = 0;
           setState('listening');
         }
       };
@@ -627,7 +736,7 @@ export const LivePage: React.FC<LivePageProps> = ({
       console.warn('Error starting microphone stream:', err);
       setErrorMessage(
         err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
-          ? 'Microphone permission was denied. Please allow microphone access to talk with MindMirror.'
+          ? 'Microphone permission was denied. Please allow microphone access to talk with Valeria.'
           : `Failed to access microphone: ${err.message}`
       );
       setState('error');
@@ -698,15 +807,19 @@ export const LivePage: React.FC<LivePageProps> = ({
           } else if (data.type === 'audio') {
             playAudioChunk(data.audio);
           } else if (data.type === 'model_transcript_chunk') {
-            // Live append model words/tokens to active model streaming state
-            setActiveModelLiveText((prev) => prev + data.text);
+            // Buffer model transcript chunk so words reveal in sync with spoken audio pacing
+            if (data.text) {
+              modelTurnFullTextRef.current += data.text;
+            }
           } else if (data.type === 'model_transcript') {
-            // If full model transcript arrives, merge or append safely
-            setActiveModelLiveText((prev) => {
-              if (!data.text) return prev;
-              if (data.text.startsWith(prev)) return data.text;
-              return prev + data.text;
-            });
+            // If full model transcript arrives, synchronize turn buffer
+            if (data.text) {
+              if (data.text.startsWith(modelTurnFullTextRef.current)) {
+                modelTurnFullTextRef.current = data.text;
+              } else {
+                modelTurnFullTextRef.current += data.text;
+              }
+            }
           } else if (data.type === 'user_transcript') {
             // Live user speech transcription
             setActiveUserLiveText(data.text);
@@ -719,7 +832,7 @@ export const LivePage: React.FC<LivePageProps> = ({
               }
             }, 400);
           } else if (data.type === 'turn_complete') {
-            // Authoritative turn settlement: finalize user and model items into dialogue stream
+            // Authoritative turn settlement: finalize user text immediately
             const nowStamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
             setActiveUserLiveText((userTxt) => {
@@ -746,12 +859,13 @@ export const LivePage: React.FC<LivePageProps> = ({
               return '';
             });
 
-            setActiveModelLiveText((modelTxt) => {
-              if (modelTxt && modelTxt.trim()) {
-                const cleanModelText = modelTxt.trim();
+            // If no audio is queued (e.g. muted or text-only fallback), finalize model utterance immediately:
+            if (scheduledAudioNodesRef.current.length === 0) {
+              const finalText = modelTurnFullTextRef.current.trim() || modelSpokenTextRef.current.trim();
+              if (finalText) {
                 setDialogueItems((prev) => {
                   const lastItem = prev[prev.length - 1];
-                  if (lastItem && lastItem.role === 'model' && lastItem.text === cleanModelText) {
+                  if (lastItem && lastItem.role === 'model' && lastItem.text === finalText) {
                     return prev;
                   }
                   return [
@@ -759,17 +873,16 @@ export const LivePage: React.FC<LivePageProps> = ({
                     {
                       id: 'mod_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
                       role: 'model',
-                      text: cleanModelText,
+                      text: finalText,
                       timestamp: nowStamp
                     }
                   ];
                 });
-                setLastCompletedUtterance({ role: 'model', text: cleanModelText });
+                setLastCompletedUtterance({ role: 'model', text: finalText });
 
-                // Synthesize extracted takeaways for the right deck
-                if (cleanModelText.length > 40) {
+                if (finalText.length > 40) {
                   setExtractedTakeaways((prev) => {
-                    const snippet = cleanModelText.split(/[.!?]/)[0].trim();
+                    const snippet = finalText.split(/[.!?]/)[0].trim();
                     if (snippet && snippet.length > 15 && !prev.includes(snippet)) {
                       return [...prev.slice(-3), snippet];
                     }
@@ -777,14 +890,20 @@ export const LivePage: React.FC<LivePageProps> = ({
                   });
                 }
               }
-              return '';
-            });
+
+              setActiveModelLiveText('');
+              modelTurnFullTextRef.current = '';
+              modelSpokenTextRef.current = '';
+              revealedWordsCountRef.current = 0;
+              setState('listening');
+            }
+            // If audio nodes are still playing, source.onended handles finalized commit when speech finishes!
 
             if (scheduledAudioNodesRef.current.length === 0) {
               setState('listening');
             }
           } else if (data.type === 'error') {
-            console.warn('MindMirror Live error:', data.error);
+            console.warn('Valeria Live error:', data.error);
             setErrorMessage(data.error || 'Live voice bridge notice.');
             setState('error');
           } else if (data.type === 'session_closed') {
@@ -799,7 +918,7 @@ export const LivePage: React.FC<LivePageProps> = ({
 
       ws.onerror = (err) => {
         console.warn('WebSocket connection error:', err);
-        setErrorMessage('Could not connect to MindMirror live voice service.');
+        setErrorMessage('Could not connect to Valeria live voice service.');
         setState('error');
       };
 
@@ -903,9 +1022,9 @@ export const LivePage: React.FC<LivePageProps> = ({
   // Copy full live dialogue
   const handleCopyTranscript = () => {
     if (dialogueItems.length === 0 && !activeModelLiveText && !activeUserLiveText) return;
-    const lines = dialogueItems.map((item) => `[${item.timestamp}] ${item.role === 'user' ? (user.displayName || 'User') : `MindMirror (${selectedVoice})`}: ${item.text}`);
+    const lines = dialogueItems.map((item) => `[${item.timestamp}] ${item.role === 'user' ? (user.displayName || 'User') : `Valeria (${selectedVoice})`}: ${item.text}`);
     if (activeUserLiveText) lines.push(`[Live] ${user.displayName || 'User'}: ${activeUserLiveText}`);
-    if (activeModelLiveText) lines.push(`[Live] MindMirror (${selectedVoice}): ${activeModelLiveText}`);
+    if (activeModelLiveText) lines.push(`[Live] Valeria (${selectedVoice}): ${activeModelLiveText}`);
     
     navigator.clipboard.writeText(lines.join('\n\n'));
     setCopiedTranscript(true);
@@ -924,7 +1043,7 @@ export const LivePage: React.FC<LivePageProps> = ({
       const entryRef = doc(db, 'users', user.uid, 'interactions', newEntryId);
 
       const title = dialogueItems.find((d) => d.role === 'user')?.text.slice(0, 45) || 'Live Cognitive Voice Reflection';
-      const fullSummary = dialogueItems.map((d) => `${d.role === 'user' ? 'User' : 'MindMirror'}: ${d.text}`).join('\n\n');
+      const fullSummary = dialogueItems.map((d) => `${d.role === 'user' ? 'User' : 'Valeria'}: ${d.text}`).join('\n\n');
 
       const journalData: Partial<JournalEntry> = {
         id: newEntryId,
@@ -987,7 +1106,7 @@ export const LivePage: React.FC<LivePageProps> = ({
   const activeVoiceObj = AVAILABLE_VOICES.find((v) => v.name === selectedVoice) || AVAILABLE_VOICES[0];
 
   return (
-    <div id="mindmirror-live-workspace" className="min-h-[calc(100vh-4rem)] bg-stone-50/70 p-4 sm:p-6 lg:p-8 flex flex-col justify-between max-w-7xl mx-auto">
+    <div id="Valeria-live-workspace" className="min-h-[calc(100vh-4rem)] bg-stone-50/70 p-4 sm:p-6 lg:p-8 flex flex-col justify-between max-w-7xl mx-auto">
       
       {/* Top Header & Cognitive Grounding Bar */}
       <div id="live-header-bar" className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-stone-200/80">
@@ -995,7 +1114,7 @@ export const LivePage: React.FC<LivePageProps> = ({
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider bg-amber-100/80 text-amber-900 border border-amber-200">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-pulse"></span>
-              MindMirror Live
+              Valeria Live
             </span>
             <span className="text-xs text-stone-500 font-medium">Cognitive Voice Sanctuary</span>
           </div>
@@ -1151,106 +1270,23 @@ export const LivePage: React.FC<LivePageProps> = ({
               </div>
             </div>
 
-            {/* Fluid Harmonic Voice Presence (Ethereal Luminous Sphere - No DJ Disc) */}
-            <div className="relative flex items-center justify-center my-2">
-              
-              {/* Outer Radiant Auroral Glow Ring */}
-              <div 
-                className={`absolute w-56 h-56 rounded-full transition-all duration-700 ease-out pointer-events-none ${
-                  state === 'speaking' 
-                    ? 'bg-gradient-to-tr from-indigo-300/40 via-amber-200/50 to-purple-300/40 blur-2xl scale-125 opacity-90 animate-aurora-spin'
-                    : state === 'listening'
-                    ? 'bg-gradient-to-tr from-amber-300/30 via-orange-200/40 to-yellow-300/30 blur-xl scale-110 opacity-70 animate-harmonic-pulse'
-                    : 'bg-gradient-to-tr from-stone-200/30 via-amber-100/20 to-stone-200/30 blur-lg scale-95 opacity-40'
-                }`}
-                style={{
-                  transform: `scale(${state === 'speaking' ? 1 + playbackVolume * 0.4 : state === 'listening' ? 1 + micVolume * 0.35 : 1})`
-                }}
-              />
-
-              {/* Harmonic Frequency Resonance Wave Rings */}
-              {(state === 'listening' || state === 'speaking') && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  {waveFrequencies.map((freq, idx) => (
-                    <div
-                      key={idx}
-                      className="absolute rounded-full border border-amber-400/30 transition-all duration-150"
-                      style={{
-                        width: `${140 + idx * 14}px`,
-                        height: `${140 + idx * 14}px`,
-                        transform: `scale(${1 + freq * 0.35})`,
-                        opacity: 0.15 + freq * 0.45
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-
-              {/* Central Luminous Organic Core Sphere */}
-              <button
-                id="voice-orb-interactive-btn"
-                onClick={() => {
-                  if (state === 'idle' || state === 'error') {
-                    startLiveSession();
-                  } else if (state === 'speaking') {
-                    handleManualInterrupt();
-                  } else {
-                    endLiveSession();
-                  }
-                }}
-                className={`relative z-10 w-36 h-36 sm:w-40 sm:h-40 rounded-full flex flex-col items-center justify-center transition-all duration-500 shadow-md cursor-pointer group focus:outline-none focus:ring-4 focus:ring-amber-300/50 ${
-                  state === 'speaking'
-                    ? 'bg-gradient-to-br from-indigo-900 via-stone-900 to-indigo-950 text-white ring-4 ring-indigo-300/40'
-                    : state === 'listening'
-                    ? 'bg-gradient-to-br from-amber-950 via-stone-900 to-stone-950 text-white ring-4 ring-amber-400/40'
-                    : 'bg-gradient-to-br from-stone-900 via-stone-800 to-stone-900 text-stone-100 hover:scale-105 ring-2 ring-stone-200'
-                }`}
-                title={state === 'idle' ? 'Click to Begin Voice Session' : 'Click to End Voice Session'}
-              >
-                {/* Subtle Inner Glass Refraction */}
-                <div className="absolute inset-1 rounded-full bg-gradient-to-t from-transparent via-white/5 to-white/20 pointer-events-none" />
-
-                {/* Center Icon & Label */}
-                <div className="flex flex-col items-center justify-center z-10 text-center px-2">
-                  {state === 'idle' ? (
-                    <>
-                      <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-300 mb-1 group-hover:bg-amber-500/30 transition-colors">
-                        <Mic className="w-5 h-5" />
-                      </div>
-                      <span className="text-xs font-semibold tracking-wide text-amber-100 uppercase">Begin Voice</span>
-                      <span className="text-[10px] text-stone-400 mt-0.5">Mindful Dialogue</span>
-                    </>
-                  ) : state === 'connecting' ? (
-                    <>
-                      <RefreshCw className="w-7 h-7 text-amber-400 animate-spin mb-1" />
-                      <span className="text-xs font-semibold text-amber-200">Connecting</span>
-                    </>
-                  ) : state === 'speaking' ? (
-                    <>
-                      <div className="flex items-center gap-1 h-6 mb-1">
-                        {waveFrequencies.slice(0, 5).map((f, i) => (
-                          <div
-                            key={i}
-                            className="w-1 bg-indigo-300 rounded-full transition-all duration-100"
-                            style={{ height: `${Math.max(4, f * 24)}px` }}
-                          />
-                        ))}
-                      </div>
-                      <span className="text-xs font-semibold text-indigo-200">Speaking...</span>
-                      <span className="text-[10px] text-indigo-300/80">Tap to Interrupt</span>
-                    </>
-                  ) : (
-                    <>
-                      <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-400 mb-1 animate-pulse">
-                        <Mic className="w-5 h-5" />
-                      </div>
-                      <span className="text-xs font-semibold text-amber-200">Listening...</span>
-                      <span className="text-[10px] text-stone-400">Speak openly</span>
-                    </>
-                  )}
-                </div>
-              </button>
-            </div>
+            {/* Gemini Ethereal Aurora Fluid Orb */}
+            <GeminiAuroraOrb
+              state={state}
+              micVolume={micVolume}
+              playbackVolume={playbackVolume}
+              waveFrequencies={waveFrequencies}
+              selectedVoice={selectedVoice}
+              onClick={() => {
+                if (state === 'idle' || state === 'error') {
+                  startLiveSession();
+                } else if (state === 'speaking') {
+                  handleManualInterrupt();
+                } else {
+                  endLiveSession();
+                }
+              }}
+            />
 
             {/* Live Subtitle Focus HUD (Permanently visible and doesn't abruptly vanish) */}
             <div id="live-subtitle-hud" className="w-full max-w-lg mt-3 px-4 py-2.5 rounded-xl bg-stone-50/90 border border-stone-200/80 text-center min-h-[46px] flex items-center justify-center">
@@ -1271,7 +1307,7 @@ export const LivePage: React.FC<LivePageProps> = ({
                 </p>
               ) : (
                 <p className="text-xs text-stone-400 font-serif italic">
-                  "Speak your reflections or questions naturally. MindMirror responds with mindful clarity."
+                  "Speak your reflections or questions naturally. Valeria responds with mindful clarity."
                 </p>
               )}
             </div>
@@ -1334,7 +1370,7 @@ export const LivePage: React.FC<LivePageProps> = ({
                           ) : (
                             <>
                               <Bot className="w-3 h-3 text-indigo-600" />
-                              MindMirror ({selectedVoice})
+                              Valeria ({selectedVoice})
                             </>
                           )}
                         </span>
@@ -1366,7 +1402,7 @@ export const LivePage: React.FC<LivePageProps> = ({
                       <div className="flex items-center justify-between mb-1">
                         <span className="font-semibold text-[11px] flex items-center gap-1 text-indigo-700">
                           <Bot className="w-3 h-3 text-indigo-600" />
-                          MindMirror ({selectedVoice}) (Reflecting...)
+                          Valeria ({selectedVoice}) (Reflecting...)
                         </span>
                         <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
                       </div>
@@ -1560,25 +1596,6 @@ export const LivePage: React.FC<LivePageProps> = ({
                   </div>
                 )}
               </div>
-
-              {/* Connected Memory & Long-Term Pattern Anchors */}
-              <div className="pt-2 border-t border-stone-100">
-                <div className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider mb-1.5">
-                  Synchronized Cognitive Memory:
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="p-2 rounded-lg bg-stone-50 border border-stone-200/80">
-                    <span className="text-[10px] font-semibold text-stone-400 block">Reflections Archive</span>
-                    <span className="font-bold text-stone-800">{entries.length} Saved Entries</span>
-                  </div>
-                  <div className="p-2 rounded-lg bg-stone-50 border border-stone-200/80">
-                    <span className="text-[10px] font-semibold text-stone-400 block">Dominant Focus</span>
-                    <span className="font-bold text-stone-800 truncate block">
-                      {cognitivePatterns?.recurringGoals?.[0] || 'Mindful Clarity'}
-                    </span>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
 
@@ -1659,7 +1676,7 @@ export const LivePage: React.FC<LivePageProps> = ({
             <div className="mt-3">
               {extractedTakeaways.length === 0 ? (
                 <p className="text-xs text-stone-400 italic py-2">
-                  As you speak with MindMirror, key reflections and realizations will distill here automatically.
+                  As you speak with Valeria, key reflections and realizations will distill here automatically.
                 </p>
               ) : (
                 <ul className="space-y-1.5">

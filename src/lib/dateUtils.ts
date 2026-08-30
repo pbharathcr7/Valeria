@@ -1,5 +1,5 @@
 /**
- * Date and Week Utilities for MindMirror
+ * Date and Week Utilities for Valeria
  * Strict local calendar time calculations to prevent UTC timezone date-shifting.
  */
 

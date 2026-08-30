@@ -40,7 +40,7 @@ interface WeeklyVisualAnalyticsProps {
   isLoading?: boolean;
 }
 
-// MindMirror Sophisticated Warm Neutral Palette
+// Valeria Sophisticated Warm Neutral Palette
 const THEME_COLORS = [
   '#1c1917', // stone-900 (deep espresso)
   '#78350f', // amber-900 (warm sienna)
@@ -744,7 +744,7 @@ export const WeeklyVisualAnalytics: React.FC<WeeklyVisualAnalyticsProps> = ({
               </div>
 
               <div className="pt-2 border-t border-stone-100 flex items-center justify-between">
-                <span className="text-[11px] font-mono text-stone-400">MindMirror Cognitive Grounding</span>
+                <span className="text-[11px] font-mono text-stone-400">Valeria Cognitive Grounding</span>
                 <button
                   type="button"
                   onClick={() => setSelectedEvidenceTheme(null)}

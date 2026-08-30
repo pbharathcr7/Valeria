@@ -454,7 +454,7 @@ export default function App() {
       <div className="min-h-screen bg-stone-50 flex items-center justify-center">
         <div className="text-center space-y-3">
           <div className="w-8 h-8 border-3 border-stone-300 border-t-stone-800 rounded-full animate-spin mx-auto" />
-          <p className="text-xs font-mono text-stone-500">Initializing MindMirror &amp; Auth...</p>
+          <p className="text-xs font-mono text-stone-500">Initializing Valeria &amp; Auth...</p>
         </div>
       </div>
     );

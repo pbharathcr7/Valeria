@@ -149,10 +149,10 @@ export async function createGoogleCalendarEvent(action: CalendarAction): Promise
   const { start, end } = buildCalendarEventTimes(action);
 
   const payload: any = {
-    summary: action.title || 'MindMirror Reminder',
+    summary: action.title || 'Valeria Reminder',
     description: action.description 
-      ? `${action.description}\n\nCreated from MindMirror cognitive reflection.` 
-      : 'Created from MindMirror cognitive reflection.',
+      ? `${action.description}\n\nCreated from Valeria cognitive reflection.` 
+      : 'Created from Valeria cognitive reflection.',
     start,
     end,
     reminders: {

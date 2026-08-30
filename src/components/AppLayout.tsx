@@ -28,7 +28,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   return (
-    <div id="mindmirror-app-layout" className="min-h-screen bg-stone-50 text-stone-900 flex flex-col md:pl-64">
+    <div id="Valeria-app-layout" className="min-h-screen bg-stone-50 text-stone-900 flex flex-col md:pl-64">
       {/* Persistent Left Sidebar Navigation */}
       <Sidebar
         currentPath={currentPath}
@@ -58,7 +58,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
               <BrainCircuit className="w-4 h-4 text-amber-300" />
             </div>
             <span className="font-serif font-bold text-base tracking-tight text-stone-900">
-              MindMirror
+              Valeria
             </span>
           </div>
         </div>

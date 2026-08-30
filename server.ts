@@ -144,7 +144,7 @@ CRITICAL MEMORY GROUNDING RULES:
       }
     }
 
-    const systemPrompt = `You are MindMirror, an empathetic, intellectually rigorous, and calm cognitive journaling companion.
+    const systemPrompt = `You are Valeria, an empathetic, intellectually rigorous, and calm cognitive journaling companion.
 Your purpose is to help the user think deeply, unpack complex thoughts, gain self-awareness, and find clarity without ever feeling judged.
 
 Current Reference Date: ${currentDateStr} (${currentDayOfWeek}).
@@ -261,7 +261,7 @@ app.post('/api/reflect/synthesize', async (req: Request, res: Response) => {
     }
 
     const conversationText = messages
-      .map((m: any) => `${m.role === 'user' ? 'User' : 'MindMirror'}: ${m.content}`)
+      .map((m: any) => `${m.role === 'user' ? 'User' : 'Valeria'}: ${m.content}`)
       .join('\n\n');
 
     const prompt = `Analyze this cognitive reflection session and generate a structured JSON synthesis.
@@ -470,7 +470,7 @@ Long-term Cognitive Patterns Context:
 `;
     }
 
-    const prompt = `You are MindMirror's Cognitive Synthesis Engine. Analyze the user's reflection entries from this current week (${weekStart || 'This Week'} to ${weekEnd || 'Today'}) and generate a structured Weekly Reflection Digest including a comprehensive "Mind Share This Week" cognitive focus analysis.
+    const prompt = `You are Valeria's Cognitive Synthesis Engine. Analyze the user's reflection entries from this current week (${weekStart || 'This Week'} to ${weekEnd || 'Today'}) and generate a structured Weekly Reflection Digest including a comprehensive "Mind Share This Week" cognitive focus analysis.
 
 User's Weekly Reflections (${entries.length} sessions):
 """
@@ -966,7 +966,7 @@ app.post('/api/documents/ask', async (req: Request, res: Response) => {
         recent.map((m: any) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.message || m.content || ''}`).join('\n') + '\n';
     }
 
-    const systemInstruction = `You are MindMirror Document Intelligence, an AI assistant answering questions exclusively about the uploaded document "${fileName}".
+    const systemInstruction = `You are Valeria Document Intelligence, an AI assistant answering questions exclusively about the uploaded document "${fileName}".
 
 CORE STRICT RAG GROUNDING RULES:
 1. EXCLUSIVE SOURCE OF TRUTH: Answer the user's question ONLY using the retrieved document excerpts provided below. Do not use outside assumptions, hallucinated facts, or general knowledge not contained in the text.
@@ -1039,11 +1039,11 @@ Provide the answer strictly using the retrieved excerpts above and format with *
 async function start() {
   const httpServer = http.createServer(app);
 
-  // Initialize WebSocket server for MindMirror Live bidirectional audio streaming
+  // Initialize WebSocket server for Valeria Live bidirectional audio streaming
   const wss = new WebSocketServer({ noServer: true });
 
   wss.on('error', (err: any) => {
-    console.warn('MindMirror Live WebSocketServer warning:', err?.message || err);
+    console.warn('Valeria Live WebSocketServer warning:', err?.message || err);
   });
 
   httpServer.on('upgrade', (request, socket, head) => {
@@ -1061,7 +1061,7 @@ async function start() {
   });
 
   wss.on('connection', async (ws: WebSocket) => {
-    console.log('MindMirror Live: Client WebSocket connected.');
+    console.log('Valeria Live: Client WebSocket connected.');
     let liveSession: any = null;
     let isClosed = false;
 
@@ -1104,9 +1104,9 @@ async function start() {
         }
 
         const ai = getGeminiClient();
-        console.log(`MindMirror Live: Initializing Gemini Live session with voice: ${voiceName}`);
+        console.log(`Valeria Live: Initializing Gemini Live session with voice: ${voiceName}`);
 
-        let dynamicSystemInstruction = "You are MindMirror Live, a calm, mindful, and insightful AI voice companion in a personal cognitive workspace. You speak with natural warmth, active listening, and succinct elegance. Keep your responses conversational, natural, and concise (typically 1 to 3 sentences) suited for spoken dialogue. Help the user explore thoughts, emotional states, cognitive clarity, daily reflections, decisions, and connected ideas across their memories and workspace.";
+        let dynamicSystemInstruction = "You are Valeria Live, a calm, mindful, and insightful AI voice companion in a personal cognitive workspace. You speak with natural warmth, active listening, and succinct elegance. Keep your responses conversational, natural, and concise (typically 1 to 3 sentences) suited for spoken dialogue. Help the user explore thoughts, emotional states, cognitive clarity, daily reflections, decisions, and connected ideas across their memories and workspace.";
         
         if (groundingContext && typeof groundingContext === 'string' && groundingContext.trim()) {
           dynamicSystemInstruction += `\n\n=== USER COGNITIVE WORKSPACE GROUNDING ===\n${groundingContext.trim()}\n==========================================\nGround your insights naturally in this workspace context when relevant to the conversation.`;
@@ -1249,11 +1249,11 @@ async function start() {
     ws.on('close', () => {
       isClosed = true;
       closeLiveSession();
-      console.log('MindMirror Live: Client WebSocket disconnected.');
+      console.log('Valeria Live: Client WebSocket disconnected.');
     });
 
     ws.on('error', (err: any) => {
-      console.warn('MindMirror Live WebSocket client error handled:', err?.message || err);
+      console.warn('Valeria Live WebSocket client error handled:', err?.message || err);
       isClosed = true;
       closeLiveSession();
     });
@@ -1274,7 +1274,7 @@ async function start() {
   }
 
   httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`MindMirror server active on http://0.0.0.0:${PORT}`);
+    console.log(`Valeria server active on http://0.0.0.0:${PORT}`);
   });
 }
 

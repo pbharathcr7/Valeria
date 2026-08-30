@@ -69,7 +69,7 @@ export function createGoogleCalendarUrl(action: CalendarAction): string {
 
   const params = new URLSearchParams();
   params.set('action', 'TEMPLATE');
-  params.set('text', action.title || 'MindMirror Reminder');
+  params.set('text', action.title || 'Valeria Reminder');
   
   if (datesParam) {
     params.set('dates', datesParam);
@@ -79,7 +79,7 @@ export function createGoogleCalendarUrl(action: CalendarAction): string {
   if (action.description) {
     detailsParts.push(action.description);
   }
-  detailsParts.push('\nCreated via MindMirror cognitive reflection');
+  detailsParts.push('\nCreated via Valeria cognitive reflection');
   params.set('details', detailsParts.join('\n'));
 
   if (action.location) {

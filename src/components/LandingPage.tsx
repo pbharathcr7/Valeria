@@ -32,7 +32,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSignIn, isLoading, e
               <BrainCircuit className="w-5 h-5 text-amber-300" />
             </div>
             <div>
-              <span className="font-serif text-xl font-bold tracking-tight text-stone-900">MindMirror</span>
+              <span className="font-serif text-xl font-bold tracking-tight text-stone-900">Valeria</span>
               <span className="hidden sm:inline-block ml-2 text-xs font-mono px-2 py-0.5 rounded-md bg-stone-100 text-stone-600 border border-stone-200">
                 Cognitive Journal
               </span>
@@ -91,7 +91,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSignIn, isLoading, e
           </h1>
 
           <p className="text-lg sm:text-xl text-stone-600 font-normal max-w-2xl mx-auto leading-relaxed">
-            MindMirror transforms journaling into an ongoing, structured dialogue with Gemini. 
+            Valeria transforms journaling into an ongoing, structured dialogue with Gemini. 
             Reflect on difficult choices, brainstorm breakthrough ideas, and uncover latent patterns in your thinking.
           </p>
 
@@ -177,7 +177,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSignIn, isLoading, e
 
       {/* Footer */}
       <footer className="border-t border-stone-200 py-6 text-center text-xs text-stone-500">
-        <p>MindMirror — Your Second Brain</p>
+        <p>Valeria — Your Second Brain</p>
       </footer>
     </div>
   );

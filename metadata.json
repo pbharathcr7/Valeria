@@ -1,5 +1,5 @@
 {
-  "name": "MindMirror — AI Reflection & Cognitive Journal",
+  "name": "Valeria — AI Reflection & Cognitive Journal",
   "description": "A secure, user-authenticated personal cognitive journal powered by Gemini 3.6 Flash and Cloud Firestore with Google Sign-In and private interaction history.",
   "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

@@ -85,11 +85,11 @@ function createRawEmail(to: string, from: string, subject: string, htmlBody: str
 }
 
 /**
- * Generates an elegant, high-contrast HTML email body styled for MindMirror.
+ * Generates an elegant, high-contrast HTML email body styled for Valeria.
  */
 export function buildWeeklyDigestHtml(digest: WeeklyDigest, recipientName?: string): string {
   const { content, weekStart, weekEnd, entryCount } = digest;
-  const name = recipientName || 'MindMirror User';
+  const name = recipientName || 'Valeria User';
 
   const nextFocusItems = content.nextWeekFocus
     .map(f => `<li style="margin-bottom: 8px; color: #44403c; line-height: 1.5;">${f}</li>`)
@@ -114,7 +114,7 @@ export function buildWeeklyDigestHtml(digest: WeeklyDigest, recipientName?: stri
               <table width="100%" border="0" cellspacing="0" cellpadding="0">
                 <tr>
                   <td>
-                    <div style="font-size: 11px; font-weight: 700; color: #fde68a; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px;">MINDMIRROR COGNITIVE DIGEST</div>
+                    <div style="font-size: 11px; font-weight: 700; color: #fde68a; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px;">Valeria COGNITIVE DIGEST</div>
                     <div style="font-size: 22px; font-weight: 700; color: #fafaf9; font-family: Georgia, serif;">Weekly Reflection Digest</div>
                     <div style="font-size: 12px; color: #a8a29e; margin-top: 4px;">Week of ${weekStart} to ${weekEnd} • ${entryCount} Reflections</div>
                   </td>
@@ -180,7 +180,7 @@ export function buildWeeklyDigestHtml(digest: WeeklyDigest, recipientName?: stri
           <tr>
             <td style="background-color: #fafaf9; border-top: 1px solid #e7e5e4; padding: 20px 32px; text-align: center;">
               <div style="font-size: 11px; color: #78716c; line-height: 1.5;">
-                MindMirror AI Cognitive Reflection Journal • Built with Gemini &amp; Firebase<br>
+                Valeria AI Cognitive Reflection Journal • Built with Gemini &amp; Firebase<br>
                 This digest was synthesized at your request.
               </div>
             </td>
@@ -210,7 +210,7 @@ export async function sendWeeklyDigestEmail(digest: WeeklyDigest, userEmail: str
     token = await getGmailAccessToken(true);
   }
 
-  const subject = `Your MindMirror Weekly Digest (${digest.weekStart} - ${digest.weekEnd})`;
+  const subject = `Your Valeria Weekly Digest (${digest.weekStart} - ${digest.weekEnd})`;
   const htmlBody = buildWeeklyDigestHtml(digest, userName);
   const rawEmail = createRawEmail(userEmail, userEmail, subject, htmlBody);
 

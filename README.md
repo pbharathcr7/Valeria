@@ -1,9 +1,9 @@
-# MindMirror — AI Reflection & Cognitive Journal
+# Valeria — AI Reflection & Cognitive Journal
 > *Your second brain for thinking, not just writing.*
 
 Built for the **Google AI Studio Developer Challenge 2026**.
 
-MindMirror is an AI-powered cognitive journal that transforms journaling into an ongoing structured conversation with Gemini 3.6 Flash. User reflections and session interactions are stored securely in Google Cloud Firestore and strictly isolated to each authenticated Firebase user.
+Valeria is an AI-powered cognitive journal that transforms journaling into an ongoing structured conversation with Gemini 3.6 Flash. User reflections and session interactions are stored securely in Google Cloud Firestore and strictly isolated to each authenticated Firebase user.
 
 ---
 
@@ -76,7 +76,7 @@ service cloud.firestore {
 ### 4. Deploy Application to Cloud Run
 Build and deploy the application container:
 ```bash
-gcloud run deploy mindmirror \
+gcloud run deploy Valeria \
   --source . \
   --platform managed \
   --region us-central1 \
@@ -88,7 +88,7 @@ gcloud run deploy mindmirror \
 ### 5. Challenge Verification Label
 Attach the mandatory developer challenge campaign label:
 ```bash
-gcloud run services update mindmirror \
+gcloud run services update Valeria \
   --update-labels=dev-tutorial=cloud-run-ai-challenge \
   --region=us-central1
 ```
@@ -111,7 +111,7 @@ To ensure 100% interactive stability, walk through each of the following test sc
 2. Note that before any messages are sent, the mode dropdown selector can be changed.
 3. Enter a dilemma or reflection prompt (e.g., *"I am torn between launching a new project or optimizing my existing workflow."*) and click Send / hit Enter.
 4. Verify that the mode selector becomes locked (disabled with lock badge) to preserve session integrity.
-5. Verify that MindMirror responds with empathetic, thoughtful Socratic questions and structured analysis powered by Gemini 3.6 Flash.
+5. Verify that Valeria responds with empathetic, thoughtful Socratic questions and structured analysis powered by Gemini 3.6 Flash.
 6. Reply with a second turn (multi-turn conversation) and verify the conversation thread preserves context.
 
 ### Test Case 3: Continuous Auto-Save & Cognitive Synthesis
@@ -138,7 +138,7 @@ To ensure 100% interactive stability, walk through each of the following test sc
    - **Detected Location Card**: Displays the detected place name (*Apollo Hospital, Velachery*) and an **"Open in Google Maps"** button.
 4. Click **"Create Event in Google Calendar"**:
    - The first time this is invoked, Google Sign-In prompts for Calendar permissions (`https://www.googleapis.com/auth/calendar.events`).
-   - The event is created directly in your Google Calendar via the REST API in the background without leaving MindMirror.
+   - The event is created directly in your Google Calendar via the REST API in the background without leaving Valeria.
    - A success banner/toast appears ("Event added to Google Calendar").
    - The card updates with **"Added"** badge, a **"View Event"** link button, and an **"Undo"** button.
 5. Click **"View Event"** to verify it opens the created event directly in Google Calendar in a new tab.
@@ -148,18 +148,18 @@ To ensure 100% interactive stability, walk through each of the following test sc
 
 ### Test Case 6: Decoupled Loading States & Immediate Typing Indicator Teardown
 1. In an active reflection session, send a reflection prompt to Gemini.
-2. Verify that **"MindMirror is contemplating..."** (governed strictly by `isGenerating`) is visible only while Gemini is actively streaming/generating the response.
+2. Verify that **"Valeria is contemplating..."** (governed strictly by `isGenerating`) is visible only while Gemini is actively streaming/generating the response.
 3. Verify that the typing indicator vanishes **immediately** once the Gemini response message is rendered in the dialogue stream, without lingering during background Firestore persistence (`isSaving`).
 4. On an actionable response with a suggested Google Calendar event, click **"Create Event in Google Calendar"**.
 5. Observe that the calendar button displays its own localized loading spinner (`isCreatingCalendarEvent`) without triggering or reviving the chat contemplation indicator.
 6. Click **"Open in Google Maps"** on a location card and verify that the maps button shows its own localized state (`isOpeningMaps`) independently of the reflection chat stream.
 
 ### Test Case 7: Structured Long-Term Cognitive Memory & Growth Matrix
-1. Ensure you have at least 2 saved reflection sessions in MindMirror.
+1. Ensure you have at least 2 saved reflection sessions in Valeria.
 2. On the Dashboard, navigate to the **"Long-Term Cognitive Memory & Growth"** banner.
 3. Click **"Analyze My Cognitive Patterns"** (button ID: `generate-patterns-btn`).
 4. Verify that the button switches to its active loading state (**"Analyzing Memory..."** with spinning sparkles icon) while Gemini analyzes your cognitive history.
-5. Once complete, verify that the single text block is replaced with 5 modular, high-contrast cards conforming to MindMirror's beige/black aesthetic:
+5. Once complete, verify that the single text block is replaced with 5 modular, high-contrast cards conforming to Valeria's beige/black aesthetic:
    - **Recurring Goals Card**: Displays key recurring ambitions and intentions.
    - **Recurring Challenges Card**: Displays cognitive biases, friction points, and recurring hurdles.
    - **Strengths Gemini Observed Card**: Displays metacognition, resilience, and emotional clarity traits with Check icons.

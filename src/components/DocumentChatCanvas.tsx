@@ -299,7 +299,7 @@ export const DocumentChatCanvas: React.FC<DocumentChatCanvasProps> = ({
                 Ask anything about this document
               </h3>
               <p className="text-xs sm:text-sm text-stone-500 leading-relaxed">
-                MindMirror retrieves semantic excerpts from <span className="font-semibold text-stone-700">"{docItem.fileName}"</span> and provides factual answers strictly grounded in the text with page references.
+                Valeria retrieves semantic excerpts from <span className="font-semibold text-stone-700">"{docItem.fileName}"</span> and provides factual answers strictly grounded in the text with page references.
               </p>
             </div>
 

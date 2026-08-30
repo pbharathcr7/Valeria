@@ -62,7 +62,7 @@ function formatMemoryDate(dateStr: string): string {
 }
 
 /**
- * Clean reusable memory-retrieval utility for MindMirror
+ * Clean reusable memory-retrieval utility for Valeria
  * Retrieves relevant previous memories belonging to the authenticated user.
  */
 export function retrieveRelevantMemories({

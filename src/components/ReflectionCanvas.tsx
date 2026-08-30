@@ -587,7 +587,7 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
                 </div>
                 <div className="p-3.5 rounded-2xl bg-white border border-stone-200 text-stone-500 text-xs flex items-center gap-2 shadow-xs">
                   <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                  <span className="font-serif italic text-stone-600">MindMirror is contemplating...</span>
+                  <span className="font-serif italic text-stone-600">Valeria is contemplating...</span>
                 </div>
               </div>
             )}

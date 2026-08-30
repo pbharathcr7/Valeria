@@ -71,7 +71,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       path: '/live',
-      label: 'MindMirror Live',
+      label: 'Valeria Live',
       icon: Radio,
       badge: 'LIVE'
     },
@@ -116,7 +116,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
           <div className="flex flex-col">
             <span className="font-serif text-lg font-bold tracking-tight text-stone-900 leading-tight">
-              MindMirror
+              Valeria
             </span>
             <span className="text-[10px] text-stone-500 font-mono tracking-wider uppercase font-semibold">
               AI Cognitive Journal
@@ -230,7 +230,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             onClick={onSignOut}
             className="p-1.5 rounded-lg text-stone-400 hover:text-stone-800 hover:bg-stone-100 transition cursor-pointer shrink-0"
             title="Sign Out"
-            aria-label="Sign out of MindMirror"
+            aria-label="Sign out of Valeria"
           >
             <LogOut className="w-4 h-4" />
           </button>
