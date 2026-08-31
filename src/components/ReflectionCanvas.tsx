@@ -20,19 +20,13 @@ import {
   ChatMessage, 
   ReflectionIntent, 
   CognitiveInsight, 
-  DetectedAction, 
-  CognitivePatternAnalysis, 
-  MemoryReference 
+  DetectedAction
 } from '../types';
 import { ActionCards } from './ActionCards';
-import { RelatedMemoriesCard } from './RelatedMemoriesCard';
-import { retrieveRelevantMemories } from '../lib/memoryRetriever';
 
 interface ReflectionCanvasProps {
   initialEntry?: JournalEntry | null;
   userId: string;
-  allEntries?: JournalEntry[];
-  cognitivePatterns?: CognitivePatternAnalysis | null;
   onSaveEntry: (entry: JournalEntry) => Promise<void>;
   onClose: () => void;
   onOpenEntryById?: (entryId: string) => void;
@@ -81,8 +75,6 @@ const INTENT_OPTIONS: { id: ReflectionIntent; label: string; icon: any; descript
 export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
   initialEntry,
   userId,
-  allEntries = [],
-  cognitivePatterns = null,
   onSaveEntry,
   onClose,
   onOpenEntryById,
@@ -180,7 +172,7 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
     }, 1000);
   };
 
-  // Submit a turn to Gemini
+  // Submit a turn to Gemini with Server-Sent Events (SSE) Streaming
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const content = inputMessage.trim();
@@ -209,34 +201,26 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
       updatedAt: new Date().toISOString()
     };
 
-    setEntry(nextEntryState);
+    const aiMsgId = 'msg_' + Date.now() + '_ai';
+    const initialAiMsg: ChatMessage = {
+      id: aiMsgId,
+      role: 'model',
+      content: '',
+      timestamp: new Date().toISOString()
+    };
+
+    // Show initial AI message container immediately
+    const entryWithPlaceholder: JournalEntry = {
+      ...nextEntryState,
+      messages: [...updatedMessages, initialAiMsg]
+    };
+
+    setEntry(entryWithPlaceholder);
     setInputMessage('');
     setIsGenerating(true);
 
     // Immediate auto-save of the user message state in background
     triggerAutoSave(nextEntryState);
-
-    // Retrieve relevant previous memories for context injection
-    let memoryContextPayload: any = null;
-    let retrievedMemoriesForUI: MemoryReference[] = [];
-
-    try {
-      const memoryRetrievalResult = retrieveRelevantMemories({
-        currentMessage: content,
-        currentMessages: updatedMessages,
-        pastEntries: allEntries,
-        cognitivePatterns: cognitivePatterns,
-        currentEntryId: nextEntryState.id,
-        maxResults: 4
-      });
-
-      if (memoryRetrievalResult.relevantMemories.length > 0 || memoryRetrievalResult.cognitiveContext) {
-        memoryContextPayload = memoryRetrievalResult;
-        retrievedMemoriesForUI = memoryRetrievalResult.relevantMemories;
-      }
-    } catch (memErr) {
-      console.warn('Memory retrieval encountered a non-blocking issue, continuing without memory context:', memErr);
-    }
 
     try {
       const resp = await fetch('/api/reflect/chat', {
@@ -244,8 +228,7 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: updatedMessages,
-          intent: nextEntryState.intent,
-          memoryContext: memoryContextPayload
+          intent: nextEntryState.intent
         })
       });
 
@@ -254,31 +237,82 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
         throw new Error(errorData.error || `Server responded with status ${resp.status}`);
       }
 
-      const data = await resp.json();
-      const aiMsg: ChatMessage = {
-        id: 'msg_' + Date.now() + '_ai',
-        role: 'model',
-        content: data.content || "I've reflected on your thought.",
-        actions: Array.isArray(data.actions) && data.actions.length > 0 ? data.actions : undefined,
-        memoryReferences: retrievedMemoriesForUI.length > 0 ? retrievedMemoriesForUI : undefined,
-        timestamp: data.timestamp || new Date().toISOString()
-      };
+      if (!resp.body) {
+        throw new Error('ReadableStream not supported by browser.');
+      }
 
-      const finalEntryWithAi: JournalEntry = {
-        ...nextEntryState,
-        messages: [...updatedMessages, aiMsg],
-        updatedAt: new Date().toISOString()
-      };
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let streamedAccumulatedText = '';
+      let buffer = '';
+      let finalActions: DetectedAction[] | undefined = undefined;
 
-      // Set entry with response and IMMEDIATELY hide the contemplation indicator
-      setEntry(finalEntryWithAi);
-      setIsGenerating(false);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      // Auto-save the complete dialogue turn with Gemini's response in background
-      triggerAutoSave(finalEntryWithAi);
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const dataStr = trimmed.replace(/^data:\s*/, '');
+          if (!dataStr) continue;
+
+          try {
+            const event = JSON.parse(dataStr);
+            if (event.chunk) {
+              streamedAccumulatedText += event.chunk;
+              setIsGenerating(false); // First token arrived! Switch off contemplation badge immediately
+
+              // Strip actions block in-flight so raw actions JSON is not exposed to the reader during generation
+              const liveDisplay = streamedAccumulatedText.replace(/```actions[\s\S]*$/i, '').trim();
+              setEntry(prev => ({
+                ...prev,
+                messages: prev.messages.map(m => m.id === aiMsgId ? { ...m, content: liveDisplay || streamedAccumulatedText } : m)
+              }));
+            } else if (event.done) {
+              const finalContent = event.content || streamedAccumulatedText.replace(/```actions[\s\S]*?```/gi, '').trim();
+              if (Array.isArray(event.actions) && event.actions.length > 0) {
+                finalActions = event.actions;
+              }
+              const finalAiMsg: ChatMessage = {
+                id: aiMsgId,
+                role: 'model',
+                content: finalContent || "I've reflected on your thought.",
+                actions: finalActions,
+                timestamp: event.timestamp || new Date().toISOString()
+              };
+
+              const finalEntryWithAi: JournalEntry = {
+                ...nextEntryState,
+                messages: [...updatedMessages, finalAiMsg],
+                updatedAt: new Date().toISOString()
+              };
+
+              setEntry(finalEntryWithAi);
+              setIsGenerating(false);
+              triggerAutoSave(finalEntryWithAi);
+            } else if (event.error) {
+              throw new Error(event.error);
+            }
+          } catch (jsonErr: any) {
+            if (jsonErr.message && !jsonErr.message.includes('JSON')) {
+              throw jsonErr;
+            }
+          }
+        }
+      }
     } catch (err: any) {
-      console.error('Error contacting Gemini:', err);
+      console.error('Error contacting Gemini streaming endpoint:', err);
       setErrorMessage(err?.message || 'Unable to reach Gemini AI. Please check your connection or API status.');
+      // Remove empty placeholder message on error if no content was received
+      setEntry(prev => ({
+        ...prev,
+        messages: prev.messages.filter(m => m.id !== aiMsgId || m.content.length > 0)
+      }));
       setIsGenerating(false);
     } finally {
       setIsGenerating(false);
@@ -525,7 +559,9 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
             )}
 
             {/* Message History */}
-            {entry.messages.map((msg, index) => (
+            {entry.messages
+              .filter(msg => msg.role === 'user' || (msg.content && msg.content.trim().length > 0) || (msg.actions && msg.actions.length > 0))
+              .map((msg, index) => (
               <div
                 key={msg.id || index}
                 className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
@@ -555,15 +591,6 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
                           actions={msg.actions} 
                           messageId={msg.id} 
                           onUpdateAction={(updatedAct) => handleUpdateAction(msg.id, updatedAct)} 
-                        />
-                      )}
-                      {msg.memoryReferences && msg.memoryReferences.length > 0 && (
-                        <RelatedMemoriesCard
-                          memoryReferences={msg.memoryReferences}
-                          onOpenMemory={onOpenEntryById ? (refId) => {
-                            triggerAutoSave(entry);
-                            onOpenEntryById(refId);
-                          } : undefined}
                         />
                       )}
                     </>

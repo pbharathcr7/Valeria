@@ -479,8 +479,6 @@ export default function App() {
           key={activeEntry?.id || 'new_reflection'}
           initialEntry={activeEntry}
           userId={currentUser.uid}
-          allEntries={entries}
-          cognitivePatterns={cognitivePatterns}
           onSaveEntry={handleSaveEntry}
           onClose={handleCloseCanvas}
           onOpenEntryById={(entryId) => {

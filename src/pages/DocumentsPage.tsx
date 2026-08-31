@@ -543,7 +543,7 @@ export const DocumentsPage: React.FC<DocumentsPageProps> = ({ user, onNewReflect
                           title={`Chat with ${doc.fileName}`}
                         >
                           <MessageSquare className="w-3.5 h-3.5 text-stone-500 group-hover:text-stone-800 transition-colors" />
-                          <span>Ask this PDF</span>
+                          <span>Chat</span>
                         </button>
 
                         {/* Primary Action: Use in Voice Conversation */}
@@ -555,7 +555,7 @@ export const DocumentsPage: React.FC<DocumentsPageProps> = ({ user, onNewReflect
                           title={`Start live voice conversation grounded in ${doc.fileName}`}
                         >
                           <Mic className="w-3.5 h-3.5 text-stone-950 group-hover:scale-110 transition-transform" />
-                          <span>Use in Voice Conversation</span>
+                          <span>Voice Conversation</span>
                         </button>
                       </div>
                     )}
