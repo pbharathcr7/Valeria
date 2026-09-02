@@ -41,6 +41,7 @@ function getGeminiClient(): GoogleGenAI {
 const MODEL_FALLBACK_CHAIN = [
   'gemini-3.5-flash-lite',
   'gemini-3.6-flash',
+  'gemini-flash-latest',
   'gemini-3.7-flash'
 ];
 
@@ -119,54 +120,126 @@ async function generateContentWithFallback(params: {
   throw lastError || new Error('All models in fallback chain failed to generate response.');
 }
 
-// Helper to extract actions and clean Markdown content
-function extractActionsAndCleanContent(rawText: string): { cleanedContent: string; actions: any[] } {
+// Helper to extract actions, titles, and clean Markdown content
+function extractActionsAndCleanContent(rawText: string): { cleanedContent: string; actions: any[]; suggestedTitle?: string } {
+  if (!rawText) return { cleanedContent: '', actions: [] };
   let cleanedContent = rawText;
-  let actions: any[] = [];
+  const actions: any[] = [];
+  let suggestedTitle: string | undefined = undefined;
 
-  // Match ```actions ... ``` or <!--ACTIONS: ... -->
-  const actionsMatch = rawText.match(/```actions\s*([\s\S]*?)\s*```/i) ||
-                       rawText.match(/<!--ACTIONS:\s*([\s\S]*?)\s*-->/i);
-
-  if (actionsMatch) {
-    try {
-      const parsed = JSON.parse(actionsMatch[1].trim());
-      if (Array.isArray(parsed)) {
-        actions = parsed
-          .filter((act: any) => act && (act.type === 'calendar' || act.type === 'maps'))
-          .map((act: any, idx: number) => ({
-            ...act,
-            id: act.id || `act_${Date.now()}_${idx}`
-          }));
-      }
-    } catch (err) {
-      console.warn('Failed to parse actions block JSON:', err);
+  // 1. Extract ```title ... ``` if present
+  const titleBlockRegex = /```title\s*([\s\S]*?)\s*```/i;
+  const titleMatch = titleBlockRegex.exec(cleanedContent);
+  if (titleMatch) {
+    const candidate = titleMatch[1].trim().replace(/^["']|["']$/g, '');
+    if (candidate.length > 0 && candidate.length < 80) {
+      suggestedTitle = candidate;
     }
-    cleanedContent = rawText.replace(/```actions\s*[\s\S]*?\s*```/gi, '').trim();
-  } else {
-    // If the entire text happened to be JSON (e.g. { content: "...", actions: [...] })
+    cleanedContent = cleanedContent.replace(titleMatch[0], '');
+  }
+
+  const titleCommentRegex = /<!--TITLE:\s*([\s\S]*?)\s*-->/i;
+  const titleCommentMatch = titleCommentRegex.exec(cleanedContent);
+  if (titleCommentMatch) {
+    const candidate = titleCommentMatch[1].trim().replace(/^["']|["']$/g, '');
+    if (candidate.length > 0 && candidate.length < 80) {
+      suggestedTitle = candidate;
+    }
+    cleanedContent = cleanedContent.replace(titleCommentMatch[0], '');
+  }
+
+  const parseAndCollectActions = (jsonStr: string): boolean => {
     try {
-      const jsonClean = rawText.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
-      if (jsonClean.startsWith('{') && jsonClean.endsWith('}')) {
-        const parsed = JSON.parse(jsonClean);
-        if (parsed.content && typeof parsed.content === 'string') {
-          cleanedContent = parsed.content;
-        }
-        if (Array.isArray(parsed.actions)) {
-          actions = parsed.actions
-            .filter((act: any) => act && (act.type === 'calendar' || act.type === 'maps'))
-            .map((act: any, idx: number) => ({
+      const parsed = JSON.parse(jsonStr.trim());
+      if (Array.isArray(parsed)) {
+        const validActions = parsed
+          .filter((act: any) => act && typeof act === 'object' && (act.type === 'calendar' || act.type === 'maps' || act.placeName || (act.title && (act.date || act.time))))
+          .map((act: any, idx: number) => {
+            const type = act.type || (act.placeName ? 'maps' : 'calendar');
+            return {
               ...act,
+              type,
               id: act.id || `act_${Date.now()}_${idx}`
-            }));
+            };
+          });
+        if (validActions.length > 0) {
+          actions.push(...validActions);
+          return true;
+        }
+      } else if (parsed && typeof parsed === 'object') {
+        if (Array.isArray(parsed.actions)) {
+          return parseAndCollectActions(JSON.stringify(parsed.actions));
         }
       }
     } catch {
-      // Not a full JSON payload, use rawText as content
+      // not valid json
+    }
+    return false;
+  };
+
+  // 1. Match ```actions ... ``` or <!--ACTIONS: ... -->
+  const actionsBlockRegex = /```actions\s*([\s\S]*?)\s*```/gi;
+  let match: RegExpExecArray | null;
+  while ((match = actionsBlockRegex.exec(cleanedContent)) !== null) {
+    if (parseAndCollectActions(match[1])) {
+      cleanedContent = cleanedContent.replace(match[0], '');
     }
   }
 
-  return { cleanedContent: cleanedContent.trim(), actions };
+  const commentBlockRegex = /<!--ACTIONS:\s*([\s\S]*?)\s*-->/gi;
+  while ((match = commentBlockRegex.exec(cleanedContent)) !== null) {
+    if (parseAndCollectActions(match[1])) {
+      cleanedContent = cleanedContent.replace(match[0], '');
+    }
+  }
+
+  // 2. Match ```json [...] ``` or ``` [...] ``` containing action objects
+  const codeBlockRegex = /```(?:json)?\s*(\[\s*\{[\s\S]*?\}\s*\])\s*```/gi;
+  while ((match = codeBlockRegex.exec(cleanedContent)) !== null) {
+    if (parseAndCollectActions(match[1])) {
+      cleanedContent = cleanedContent.replace(match[0], '');
+    }
+  }
+
+  // 3. Match raw JSON array of actions e.g. [ { "type": "calendar" ... } ]
+  const rawArrayRegex = /(\[\s*\{\s*"(?:type|placeName|title)"[\s\S]*?\}\s*\])/gi;
+  while ((match = rawArrayRegex.exec(cleanedContent)) !== null) {
+    if (parseAndCollectActions(match[1])) {
+      cleanedContent = cleanedContent.replace(match[0], '');
+    }
+  }
+
+  // 4. If the entire response was wrapped in a JSON payload like { content: "...", actions: [...] }
+  try {
+    const jsonClean = cleanedContent.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
+    if (jsonClean.startsWith('{') && jsonClean.endsWith('}')) {
+      const parsed = JSON.parse(jsonClean);
+      if (parsed.content || parsed.reflection || parsed.message) {
+        cleanedContent = parsed.content || parsed.reflection || parsed.message;
+      }
+      if (Array.isArray(parsed.actions)) {
+        parseAndCollectActions(JSON.stringify(parsed.actions));
+      }
+    }
+  } catch {
+    // Not full json payload
+  }
+
+  // Strip any lingering unclosed ```actions blocks or trailing backtick fences
+  cleanedContent = cleanedContent
+    .replace(/```actions[\s\S]*$/gi, '')
+    .replace(/\n```\s*$/g, '')
+    .trim();
+
+  // Deduplicate actions
+  const uniqueActions = actions.filter((act, index, self) =>
+    index === self.findIndex((a) => (
+      a.type === act.type &&
+      (a.type === 'calendar' ? a.title === act.title && a.date === act.date : a.placeName === act.placeName)
+    ))
+  );
+
+  return { cleanedContent, actions: uniqueActions };
 }
 
 // API Health Check
@@ -204,7 +277,7 @@ app.post('/api/reflect/chat', async (req: Request, res: Response) => {
     const currentDateStr = now.toISOString().split('T')[0];
     const currentDayOfWeek = now.toLocaleDateString('en-US', { weekday: 'long' });
 
-    const systemPrompt = `You are Valeria, an empathetic, intellectually rigorous, and calm cognitive journaling companion.
+    let systemPrompt = `You are Valeria, an empathetic, intellectually rigorous, and calm cognitive journaling companion.
 Your purpose is to help the user think deeply, unpack complex thoughts, gain self-awareness, and find clarity without ever feeling judged.
 
 Current Reference Date: ${currentDateStr} (${currentDayOfWeek}).
@@ -233,13 +306,25 @@ Analyze the user's thought and reflection context for commitments or physical pl
 2. Maps Action Detection:
    - Detect physical locations, venues, hospitals, parks, offices, landmarks, or addresses naturally mentioned.
    - Fields: "type": "maps", "placeName": string (exact place name or location query).
-3. If calendar commitments or physical locations are mentioned, append an actions block at the very end of your response formatted exactly as:
+3. If calendar commitments or physical locations are mentioned, output your natural conversational response FIRST. Then append an actions block at the very end of your response formatted strictly as:
 \`\`\`actions
 [
   { "type": "calendar", "title": "Interview", "date": "${currentDateStr}", "time": "3:00 PM" }
 ]
 \`\`\`
-If no calendar actions or places are mentioned, DO NOT include any \`\`\`actions block. Write your natural Markdown response directly.`;
+CRITICAL: Never write raw JSON arrays or structures directly inside your conversational reflection prose. Always format your reflection in clean, expressive Markdown first, and place detected actions strictly in the \`\`\`actions code block at the very end. If no actions or places are mentioned, DO NOT include any \`\`\`actions block.`;
+
+    const userMsgCount = messages.filter((m: any) => m.role === 'user').length;
+    const isFirstTurn = userMsgCount <= 1;
+
+    if (isFirstTurn) {
+      systemPrompt += `\n\n4. Smart Title Suggestion (First Turn):
+   - Provide a concise, evocative 3 to 6 word title summarizing the user's primary reflection topic.
+   - Append it at the very end formatted strictly as:
+\`\`\`title
+Evocative 3-6 Word Title
+\`\`\``;
+    }
 
     timings['2. Building systemPrompt'] = performance.now() - s2Start;
 
@@ -329,14 +414,30 @@ If no calendar actions or places are mentioned, DO NOT include any \`\`\`actions
     }
 
     // Stage 6: Action extraction and clean Markdown processing
-    const { cleanedContent, actions: detectedActions } = extractActionsAndCleanContent(accumulatedText);
+    const { cleanedContent, actions: detectedActions, suggestedTitle: extractedTitle } = extractActionsAndCleanContent(accumulatedText);
     const totalDuration = performance.now() - reqStart;
+
+    // Smart title fallback if it's the first user turn and model did not output ```title
+    let finalSuggestedTitle = extractedTitle;
+    if (!finalSuggestedTitle && isFirstTurn) {
+      const firstUserMsg = messages.find((m: any) => m.role === 'user')?.content || '';
+      if (firstUserMsg) {
+        const cleanedMsg = firstUserMsg.replace(/[\r\n]+/g, ' ').replace(/[^\w\s-]/g, '').trim();
+        const words = cleanedMsg.split(/\s+/).filter(Boolean);
+        if (words.length > 0) {
+          finalSuggestedTitle = words.slice(0, 5).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+        }
+      }
+    }
 
     // Send final completion SSE payload
     res.write(`data: ${JSON.stringify({
       done: true,
       content: cleanedContent || accumulatedText,
+      fullText: cleanedContent || accumulatedText,
+      cleanedContent: cleanedContent || accumulatedText,
       actions: detectedActions,
+      suggestedTitle: finalSuggestedTitle || undefined,
       modelUsed: chosenModel,
       timeToFirstTokenMs,
       totalDurationMs: totalDuration,

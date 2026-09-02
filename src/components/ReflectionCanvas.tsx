@@ -72,6 +72,33 @@ const INTENT_OPTIONS: { id: ReflectionIntent; label: string; icon: any; descript
   }
 ];
 
+/**
+ * Strips raw action JSON structures, ```actions blocks, and dangling fences from conversational text.
+ */
+export function cleanReflectionContent(rawText?: string): string {
+  if (!rawText) return '';
+  let text = rawText;
+
+  // 1. Strip ```actions ... ``` (both complete and unclosed during streaming)
+  text = text.replace(/```actions\s*[\s\S]*?(?:```|$)/gi, '');
+  // 2. Strip <!--ACTIONS: ... -->
+  text = text.replace(/<!--ACTIONS:\s*[\s\S]*?(?:-->|$)/gi, '');
+  // 3. Strip ```json containing calendar/maps actions
+  text = text.replace(/```(?:json)?\s*\[\s*\{[\s\S]*?"type"\s*:\s*"(?:calendar|maps)"[\s\S]*?(?:```|$)/gi, '');
+  // 4. Strip raw JSON array of calendar/maps actions [ { "type": "calendar" ... } ]
+  text = text.replace(/\[\s*\{\s*"type"\s*:\s*"(?:calendar|maps)"[\s\S]*?(?:\]|$)/gi, '');
+  text = text.replace(/\[\s*\{\s*"(?:type|placeName|title)"[\s\S]*?"(?:calendar|maps)"[\s\S]*?(?:\]|$)/gi, '');
+  // 5. Strip trailing unclosed ```actions
+  text = text.replace(/```actions[\s\S]*$/gi, '');
+  // 6. Strip ```title ... ``` (both complete and unclosed during streaming)
+  text = text.replace(/```title\s*[\s\S]*?(?:```|$)/gi, '');
+  text = text.replace(/<!--TITLE:\s*[\s\S]*?(?:-->|$)/gi, '');
+  // 7. Strip dangling triple backtick fences at the end
+  text = text.replace(/\n```\s*$/g, '');
+
+  return text.trim();
+}
+
 export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
   initialEntry,
   userId,
@@ -265,26 +292,35 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
             const event = JSON.parse(jsonStr);
             if (event.chunk) {
               accumulatedText += event.chunk;
+              const displayStreamText = cleanReflectionContent(accumulatedText);
               setEntry(prev => {
                 const msgs = prev.messages.map(m => 
-                  m.id === aiMsgId ? { ...m, content: accumulatedText } : m
+                  m.id === aiMsgId ? { ...m, content: displayStreamText } : m
                 );
                 return { ...prev, messages: msgs };
               });
             } else if (event.done) {
-              const finalContent = event.fullText || accumulatedText;
+              const rawFinal = event.content || event.fullText || event.cleanedContent || accumulatedText;
+              const finalContent = cleanReflectionContent(rawFinal) || "I've reflected on your thought.";
               const finalActions: DetectedAction[] = event.actions || [];
 
               const finalAiMsg: ChatMessage = {
                 id: aiMsgId,
                 role: 'model',
-                content: finalContent || "I've reflected on your thought.",
+                content: finalContent,
                 actions: finalActions,
                 timestamp: event.timestamp || new Date().toISOString()
               };
 
+              // Auto-title reflection if title is still the default 'New Reflection' or empty
+              const isDefaultTitle = !nextEntryState.title || nextEntryState.title.trim() === 'New Reflection' || nextEntryState.title.trim() === '';
+              const resolvedTitle = (isDefaultTitle && event.suggestedTitle?.trim())
+                ? event.suggestedTitle.trim()
+                : nextEntryState.title;
+
               const finalEntryWithAi: JournalEntry = {
                 ...nextEntryState,
+                title: resolvedTitle,
                 messages: [...updatedMessages, finalAiMsg],
                 updatedAt: new Date().toISOString()
               };
@@ -353,16 +389,25 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
       }
 
       const data = await resp.json();
-      const insights: CognitiveInsight = data.insights || {
-        mood: 'Reflective',
-        keyThemes: [],
-        takeaways: [],
-        actionItems: []
+      const synth = data.synthesis || data.insights || data;
+      const insights: CognitiveInsight = {
+        mood: synth.mood || 'Reflective',
+        keyThemes: synth.keyThemes || [],
+        takeaways: synth.takeaways || [],
+        actionItems: synth.actionItems || [],
+        cognitiveBiases: synth.cognitiveBiases || [],
+        suggestedPromptForNextTime: synth.suggestedPromptForNextTime || synth.suggestedPrompt
       };
+
+      const isDefaultTitle = !entry.title || entry.title.trim() === 'New Reflection' || entry.title.trim() === '';
+      const resolvedTitle = (isDefaultTitle && synth.title?.trim())
+        ? synth.title.trim()
+        : entry.title;
 
       const finalEntry: JournalEntry = {
         ...entry,
-        summary: data.summary || entry.summary,
+        title: resolvedTitle,
+        summary: synth.summary || data.summary || entry.summary,
         insights,
         tags: Array.from(new Set([...(entry.tags || []), ...(insights.keyThemes || [])])),
         updatedAt: new Date().toISOString()
@@ -552,8 +597,11 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
             )}
 
             {/* Message Stream */}
-            {entry.messages.map((msg) => {
+            {entry.messages.map((msg, msgIdx) => {
               const isUser = msg.role === 'user';
+              const displayContent = isUser ? msg.content : cleanReflectionContent(msg.content);
+              const isThinking = !isUser && !displayContent && isGenerating && msgIdx === entry.messages.length - 1;
+
               return (
                 <div
                   key={msg.id}
@@ -577,9 +625,20 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
                   >
                     {isUser ? (
                       <p className="whitespace-pre-wrap">{msg.content}</p>
+                    ) : isThinking ? (
+                      <div className="flex items-center gap-3 py-1 text-stone-600">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-amber-600/70 animate-bounce [animation-delay:-0.3s]"></span>
+                          <span className="w-2 h-2 rounded-full bg-amber-600/70 animate-bounce [animation-delay:-0.15s]"></span>
+                          <span className="w-2 h-2 rounded-full bg-amber-600/70 animate-bounce"></span>
+                        </div>
+                        <span className="text-xs font-serif italic text-stone-500">
+                          Valeria is reflecting on your thoughts...
+                        </span>
+                      </div>
                     ) : (
                       <div className="markdown-body">
-                        <ReactMarkdown>{msg.content || '...'}</ReactMarkdown>
+                        <ReactMarkdown>{displayContent || '...'}</ReactMarkdown>
                       </div>
                     )}
                   </div>
