@@ -130,7 +130,9 @@ export const CapsuleDetailPage: React.FC<CapsuleDetailPageProps> = ({
     };
   }, [capsuleId]);
 
-  const isHost = !capsule?.ownerId || capsule?.ownerId === userId || !userId || (Array.isArray(capsule?.participantIds) && capsule.participantIds.includes(userId));
+  // True owner check: only the user who created the event is the host/owner.
+  // Invited participants and contributors can pool memories and photos, but cannot delete the event.
+  const isOwner = Boolean(!capsule?.ownerId || capsule?.ownerId === userId);
 
   const inviteUrl = capsule?.inviteCode 
     ? `${window.location.origin}/capsules?capsuleInvite=${capsule.inviteCode}&capsuleId=${capsule.id}`
@@ -159,7 +161,7 @@ export const CapsuleDetailPage: React.FC<CapsuleDetailPageProps> = ({
   };
 
   const handleSaveHostMemory = async () => {
-    if (!capsule || !isHost) return;
+    if (!capsule || !isOwner) return;
     try {
       const updated = { 
         ...capsule, 
@@ -177,6 +179,11 @@ export const CapsuleDetailPage: React.FC<CapsuleDetailPageProps> = ({
 
   const handleConfirmDeleteCapsule = async () => {
     if (!capsule) return;
+    if (!isOwner) {
+      setError('Only the event host can delete this archive event.');
+      setShowDeleteModal(false);
+      return;
+    }
     try {
       setIsDeletingCapsule(true);
       setError(null);
@@ -408,14 +415,14 @@ export const CapsuleDetailPage: React.FC<CapsuleDetailPageProps> = ({
             <span>{isSynthesizing ? 'Synthesizing...' : capsule.mosaic ? 'View AI Mosaic' : 'Generate Mosaic'}</span>
           </button>
 
-          {/* Host Actions */}
-          {isHost && (
+          {/* Host Actions - Only visible to event owner */}
+          {isOwner && (
             <button
               type="button"
               id="delete-capsule-btn"
               onClick={() => setShowDeleteModal(true)}
               className="p-2 rounded-xl text-stone-400 hover:text-rose-600 hover:bg-rose-50 border border-stone-200 transition cursor-pointer"
-              title="Delete Archive Event"
+              title="Delete Archive Event (Host only)"
             >
               <Trash2 className="w-4 h-4" />
             </button>
@@ -453,6 +460,11 @@ export const CapsuleDetailPage: React.FC<CapsuleDetailPageProps> = ({
               <span className="text-xs text-stone-300 font-mono">
                 Host: {capsule.ownerName || 'Valeria User'}
               </span>
+              {!isOwner && (
+                <span className="px-2 py-0.5 rounded-md bg-stone-800/90 border border-stone-700/80 text-amber-300 text-[10px] font-mono">
+                  Contributed Archive
+                </span>
+              )}
             </div>
 
             <h1 className="font-serif text-2xl sm:text-4xl font-bold tracking-tight text-white">
@@ -587,27 +599,29 @@ export const CapsuleDetailPage: React.FC<CapsuleDetailPageProps> = ({
         )}
 
         {/* Host Personal Perspective Card */}
-        {isHost && (
+        {(isOwner || capsule.hostMemory) && (
           <div className="p-6 rounded-3xl bg-white border border-stone-200 shadow-xs space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Quote className="w-4 h-4 text-amber-700" />
                 <h3 className="font-serif text-sm font-bold text-stone-900">
-                  Host's Vantage Point (Your Memory)
+                  {isOwner ? "Host's Vantage Point (Your Memory)" : `Host's Vantage Point (${capsule.ownerName || 'Host'})`}
                 </h3>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setIsEditingHostMemory(!isEditingHostMemory)}
-                className="text-xs text-amber-700 hover:text-amber-800 font-semibold flex items-center gap-1 cursor-pointer"
-              >
-                <Edit3 className="w-3.5 h-3.5" />
-                <span>{isEditingHostMemory ? 'Cancel' : capsule.hostMemory ? 'Edit Memory' : '+ Add Your Memory'}</span>
-              </button>
+              {isOwner && (
+                <button
+                  type="button"
+                  onClick={() => setIsEditingHostMemory(!isEditingHostMemory)}
+                  className="text-xs text-amber-700 hover:text-amber-800 font-semibold flex items-center gap-1 cursor-pointer"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>{isEditingHostMemory ? 'Cancel' : capsule.hostMemory ? 'Edit Memory' : '+ Add Your Memory'}</span>
+                </button>
+              )}
             </div>
 
-            {isEditingHostMemory ? (
+            {isEditingHostMemory && isOwner ? (
               <div className="space-y-3 pt-1">
                 <textarea
                   rows={3}
@@ -635,7 +649,7 @@ export const CapsuleDetailPage: React.FC<CapsuleDetailPageProps> = ({
               </div>
             ) : (
               <p className="text-xs sm:text-sm text-stone-700 font-serif leading-relaxed italic pl-3 border-l-2 border-stone-300">
-                {capsule.hostMemory || 'No personal reflection written yet. Click above to add your perspective.'}
+                {capsule.hostMemory || 'No personal reflection written yet.'}
               </p>
             )}
           </div>
@@ -674,7 +688,7 @@ export const CapsuleDetailPage: React.FC<CapsuleDetailPageProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {contributors.map((contrib) => {
                 const isMine = contrib.userId === userId;
-                const canDelete = isHost || isMine;
+                const canDelete = isOwner || isMine;
                 const photo = contrib.photoUrl || (contrib.photos && contrib.photos[0]);
 
                 return (
@@ -885,12 +899,12 @@ export const CapsuleDetailPage: React.FC<CapsuleDetailPageProps> = ({
           onClose={() => setShowMosaicModal(false)}
           onRegenerate={handleGenerateMosaic}
           isRegenerating={isSynthesizing}
-          isOwner={isHost}
+          isOwner={isOwner}
         />
       )}
 
       {/* Delete Archive Event Confirmation Modal */}
-      {showDeleteModal && (
+      {showDeleteModal && isOwner && (
         <div 
           className="fixed inset-0 z-50 bg-stone-950/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
           onClick={() => !isDeletingCapsule && setShowDeleteModal(false)}

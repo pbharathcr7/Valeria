@@ -101,6 +101,11 @@ export const MemoryCapsulesPage: React.FC<MemoryCapsulesPageProps> = ({
 
   const handleConfirmDelete = async () => {
     if (!capsuleToDelete) return;
+    if (capsuleToDelete.ownerId && capsuleToDelete.ownerId !== userId) {
+      setDeleteError('Only the event host can delete this archive.');
+      setCapsuleToDelete(null);
+      return;
+    }
     try {
       setIsDeleting(true);
       setDeleteError(null);
@@ -232,6 +237,8 @@ export const MemoryCapsulesPage: React.FC<MemoryCapsulesPageProps> = ({
                   })
                 : 'Event';
 
+              const isOwner = Boolean(!capsule.ownerId || capsule.ownerId === userId);
+
               return (
                 <div
                   key={capsule.id}
@@ -257,19 +264,29 @@ export const MemoryCapsulesPage: React.FC<MemoryCapsulesPageProps> = ({
                       </div>
                     )}
 
-                    {/* Quick Delete Button */}
-                    <button
-                      type="button"
-                      id={`delete-capsule-card-btn-${capsule.id}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCapsuleToDelete(capsule);
-                      }}
-                      className="absolute top-3.5 right-3.5 p-2 rounded-full bg-stone-950/60 hover:bg-rose-600 text-white backdrop-blur-md transition cursor-pointer opacity-80 hover:opacity-100 shadow-xs"
-                      title="Delete Archive Event"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {/* Quick Delete Button - Only shown to Event Host/Owner */}
+                    {isOwner ? (
+                      <button
+                        type="button"
+                        id={`delete-capsule-card-btn-${capsule.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCapsuleToDelete(capsule);
+                        }}
+                        className="absolute top-3.5 right-3.5 p-2 rounded-full bg-stone-950/60 hover:bg-rose-600 text-white backdrop-blur-md transition cursor-pointer opacity-80 hover:opacity-100 shadow-xs"
+                        title="Delete Archive Event (Host only)"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    ) : (
+                      <span 
+                        className="absolute top-3.5 right-3.5 px-2.5 py-1 rounded-full bg-stone-950/70 border border-stone-700/60 text-stone-200 text-[10px] font-mono backdrop-blur-md flex items-center gap-1 shadow-xs"
+                        title={`Collaborative event hosted by ${capsule.ownerName || 'Friend'}`}
+                      >
+                        <Users className="w-2.5 h-2.5 text-amber-400" />
+                        <span>Contributed</span>
+                      </span>
+                    )}
 
                     {/* Date Pill */}
                     <div className="absolute bottom-3 left-3.5 text-white flex items-center gap-1.5 text-xs font-mono drop-shadow-sm">

@@ -52,8 +52,8 @@ service cloud.firestore {
       // Strictly restrict collection list queries so users only retrieve archives they created or are participants in
       allow list: if request.auth != null && (
         resource.data.ownerId == request.auth.uid || 
-        (resource.data.participantIds is list && resource.data.participantIds.hasAny([request.auth.uid])) ||
-        (resource.data.contributorUids is list && resource.data.contributorUids.hasAny([request.auth.uid]))
+        (resource.data.participantIds is list && request.auth.uid in resource.data.participantIds) ||
+        (resource.data.contributorUids is list && request.auth.uid in resource.data.contributorUids)
       );
 
       // Authenticated users can create new archive events
@@ -70,7 +70,7 @@ service cloud.firestore {
         resource.data.ownerId == request.auth.uid || 
         resource.data.ownerId == null || 
         !('ownerId' in resource.data) ||
-        (resource.data.participantIds is list && resource.data.participantIds.hasAny([request.auth.uid]))
+        (resource.data.participantIds is list && (request.auth.uid in resource.data.participantIds || resource.data.participantIds.hasAny([request.auth.uid])))
       );
 
       // Collaborative contributors subcollection
@@ -81,6 +81,15 @@ service cloud.firestore {
         // Authenticated users or host can delete
         allow delete: if request.auth != null;
       }
+    }
+
+    // Recursive collectionGroup match for 'contributors' subcollections
+    // Allows querying across contributor subcollections where userId matches the authenticated user
+    match /{path=**}/contributors/{contributorId} {
+      allow read: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.contributorId == request.auth.uid
+      );
     }
   }
 }

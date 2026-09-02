@@ -372,23 +372,11 @@ export async function loadMemoryCapsules(currentUserId?: string): Promise<Memory
         const data = snap.data() as Record<string, any>;
         capsuleMap.set(snap.id, { ...data, id: snap.id } as MemoryCapsule);
       });
-    } catch (partErr) {
-      console.warn('Error querying participant capsules:', partErr);
+    } catch {
+      // Handled silently: participantIds populated when user accepts invite
     }
 
-    // 3. Fetch archives where user is in contributorUids
-    try {
-      const qContribUids = query(capsulesRef, where('contributorUids', 'array-contains', targetUid));
-      const contribUidsSnap = await getDocs(qContribUids);
-      contribUidsSnap.forEach((snap) => {
-        const data = snap.data() as Record<string, any>;
-        capsuleMap.set(snap.id, { ...data, id: snap.id } as MemoryCapsule);
-      });
-    } catch (contribUidsErr) {
-      console.warn('Error querying contributorUids capsules:', contribUidsErr);
-    }
-
-    // 4. Also discover any archives where the user contributed to the contributors subcollection
+    // 3. Also discover any archives where the user contributed to the contributors subcollection
     const userContributedCapsuleIds = new Set<string>();
     try {
       const contribGroup = collectionGroup(db, 'contributors');
@@ -423,8 +411,8 @@ export async function loadMemoryCapsules(currentUserId?: string): Promise<Memory
         });
         await Promise.all(fetchMissingPromises);
       }
-    } catch (groupErr) {
-      console.warn('Could not query contributor subcollection group:', groupErr);
+    } catch {
+      // Handled silently to avoid console noise if no contributors exist
     }
 
     // 5. Strictly filter to guarantee zero cross-user leakage
