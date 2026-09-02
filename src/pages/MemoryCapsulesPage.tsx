@@ -230,7 +230,10 @@ export const MemoryCapsulesPage: React.FC<MemoryCapsulesPageProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredCapsules.map((capsule) => {
               const formattedDate = capsule.eventDate
-                ? new Date(capsule.eventDate).toLocaleDateString('en-US', {
+                ? (/^\d{4}-\d{2}-\d{2}$/.test(capsule.eventDate.trim())
+                    ? new Date(`${capsule.eventDate.trim()}T12:00:00`)
+                    : new Date(capsule.eventDate)
+                  ).toLocaleDateString('en-US', {
                     month: 'short',
                     day: 'numeric',
                     year: 'numeric'

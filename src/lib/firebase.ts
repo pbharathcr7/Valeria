@@ -424,10 +424,10 @@ export async function loadMemoryCapsules(currentUserId?: string): Promise<Memory
       return isOwner || isParticipant || isContributor || hasContributed;
     });
 
-    // Sort descending by eventDate or createdAt
+    // Sort descending by eventDate (when memory happened) or createdAt
     rawCapsules.sort((a, b) => {
-      const timeA = new Date(a.createdAt || a.eventDate || 0).getTime();
-      const timeB = new Date(b.createdAt || b.eventDate || 0).getTime();
+      const timeA = new Date(a.eventDate || a.createdAt || 0).getTime();
+      const timeB = new Date(b.eventDate || b.createdAt || 0).getTime();
       return timeB - timeA;
     });
 

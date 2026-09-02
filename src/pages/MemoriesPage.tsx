@@ -47,6 +47,19 @@ interface MemoriesPageProps {
   onNavigate?: (path: string) => void;
 }
 
+// Helper to parse event dates accurately without UTC midnight timezone rollback
+const parseTimelineDate = (dateStr?: string): Date => {
+  if (!dateStr || !dateStr.trim()) return new Date();
+  const trimmed = dateStr.trim();
+  // If date is formatted as YYYY-MM-DD, anchoring to midday prevents rolling back across day/month boundaries in Western timezones
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const d = new Date(`${trimmed}T12:00:00`);
+    if (!isNaN(d.getTime())) return d;
+  }
+  const d = new Date(trimmed);
+  return isNaN(d.getTime()) ? new Date() : d;
+};
+
 export const MemoriesPage: React.FC<MemoriesPageProps> = ({
   userId,
   userName,
@@ -83,6 +96,9 @@ export const MemoriesPage: React.FC<MemoriesPageProps> = ({
 
             const capPhotos: TimelinePhotoItem[] = [];
 
+            // Primary event date: represents when the memories in this Life Archive actually happened
+            const archiveEventDate = cap.eventDate?.trim() || cap.createdAt || new Date().toISOString();
+
             // 1. Cover photo
             if (cap.coverPhoto) {
               capPhotos.push({
@@ -91,7 +107,7 @@ export const MemoriesPage: React.FC<MemoriesPageProps> = ({
                 caption: cap.title,
                 contributorName: cap.ownerName || 'Host',
                 emotion: 'Adventure',
-                date: cap.eventDate || cap.createdAt,
+                date: archiveEventDate,
                 capsuleId: cap.id,
                 capsuleTitle: cap.title,
                 location: cap.location,
@@ -110,7 +126,7 @@ export const MemoriesPage: React.FC<MemoriesPageProps> = ({
                   caption,
                   contributorName: c.displayName || 'Contributor',
                   emotion: c.emotion || 'Joy',
-                  date: c.createdAt || cap.eventDate || cap.createdAt,
+                  date: archiveEventDate,
                   capsuleId: cap.id,
                   capsuleTitle: cap.title,
                   location: cap.location,
@@ -127,7 +143,7 @@ export const MemoriesPage: React.FC<MemoriesPageProps> = ({
                       caption,
                       contributorName: c.displayName || 'Contributor',
                       emotion: c.emotion || 'Joy',
-                      date: c.createdAt || cap.eventDate || cap.createdAt,
+                      date: archiveEventDate,
                       capsuleId: cap.id,
                       capsuleTitle: cap.title,
                       location: cap.location,
@@ -159,10 +175,10 @@ export const MemoriesPage: React.FC<MemoriesPageProps> = ({
           })
         );
 
-        // Sort capsules by event date descending
+        // Sort capsules by event date descending (when the event happened)
         enhancedCapsules.sort((a, b) => {
-          const dateA = new Date(a.capsule.eventDate || a.capsule.createdAt).getTime();
-          const dateB = new Date(b.capsule.eventDate || b.capsule.createdAt).getTime();
+          const dateA = parseTimelineDate(a.capsule.eventDate || a.capsule.createdAt).getTime();
+          const dateB = parseTimelineDate(b.capsule.eventDate || b.capsule.createdAt).getTime();
           return dateB - dateA;
         });
 
@@ -192,8 +208,8 @@ export const MemoriesPage: React.FC<MemoriesPageProps> = ({
       photos.push(...meta.photos);
     });
 
-    // Sort descending chronologically
-    photos.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // Sort descending chronologically by event date (when memories happened)
+    photos.sort((a, b) => parseTimelineDate(b.date).getTime() - parseTimelineDate(a.date).getTime());
     return photos;
   }, [capsulesMeta]);
 
@@ -220,7 +236,7 @@ export const MemoriesPage: React.FC<MemoriesPageProps> = ({
     const groups: { [key: string]: { monthTitle: string; photos: TimelinePhotoItem[] } } = {};
 
     filteredTimelinePhotos.forEach((photo) => {
-      const d = new Date(photo.date);
+      const d = parseTimelineDate(photo.date);
       const monthKey = isNaN(d.getTime())
         ? 'Unscheduled Memories'
         : d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -367,7 +383,7 @@ export const MemoriesPage: React.FC<MemoriesPageProps> = ({
                 {/* Responsive Photo Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                   {group.photos.map((item) => {
-                    const dayFormatted = new Date(item.date).toLocaleDateString('en-US', {
+                    const dayFormatted = parseTimelineDate(item.date).toLocaleDateString('en-US', {
                       month: 'short',
                       day: 'numeric'
                     });
@@ -508,7 +524,7 @@ export const MemoriesPage: React.FC<MemoriesPageProps> = ({
                     Memory Keepsake
                   </h3>
                   <p className="text-[11px] text-stone-500 font-mono">
-                    Captured on {new Date(selectedPhoto.date).toLocaleDateString('en-US', {
+                    Captured on {parseTimelineDate(selectedPhoto.date).toLocaleDateString('en-US', {
                       weekday: 'short',
                       month: 'long',
                       day: 'numeric',
