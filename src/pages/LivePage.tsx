@@ -197,6 +197,11 @@ export const LivePage: React.FC<LivePageProps> = ({
   const micProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const silentGainRef = useRef<GainNode | null>(null);
 
+  // Session readiness state & refs for latency-aware speech synchronization
+  const [isSessionReady, setIsSessionReady] = useState<boolean>(false);
+  const isSessionReadyRef = useRef<boolean>(false);
+  const pendingInitialPromptRef = useRef<string | null>(null);
+
   const playbackAudioContextRef = useRef<AudioContext | null>(null);
   const playbackGainNodeRef = useRef<GainNode | null>(null);
   const playbackAnalyserRef = useRef<AnalyserNode | null>(null);
@@ -487,6 +492,42 @@ export const LivePage: React.FC<LivePageProps> = ({
     }
   };
 
+  // Subtle harmonic ready chime via Web Audio API to notify the user when Valeria is active and listening
+  const playReadyChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+
+      // Primary crystal tone: E5 (659Hz)
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(659.25, now);
+      gain1.gain.setValueAtTime(0.06, now);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.3);
+
+      // Harmonious upper overtone: A5 (880Hz)
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(880, now + 0.1);
+      gain2.gain.setValueAtTime(0.07, now + 0.1);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.1);
+      osc2.stop(now + 0.45);
+    } catch (e) {
+      // Audio chime is a non-blocking enhancement
+    }
+  };
+
   // Convert raw 24kHz linear PCM base64 string to AudioBuffer with glitch-free playback and synchronous word tracking
   const playAudioChunk = (base64Audio: string) => {
     if (isSpeakerMutedRef.current) return;
@@ -720,7 +761,7 @@ export const LivePage: React.FC<LivePageProps> = ({
         const pcm16 = downsampleTo16kPCM(inputData, audioCtx.sampleRate);
         const base64 = int16ArrayToBase64(pcm16);
 
-        // Stream audio chunk to backend WebSocket
+        // Stream audio chunk to backend WebSocket (will be safely buffered/forwarded by backend if still initializing)
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({
             type: 'realtime_input',
@@ -748,6 +789,9 @@ export const LivePage: React.FC<LivePageProps> = ({
     setErrorMessage(null);
     setSaveSuccessMessage(null);
     setState('connecting');
+    setIsSessionReady(false);
+    isSessionReadyRef.current = false;
+    pendingInitialPromptRef.current = customInitialPrompt || null;
     setSessionDurationSeconds(0);
     isSessionActiveRef.current = true;
 
@@ -758,8 +802,6 @@ export const LivePage: React.FC<LivePageProps> = ({
       wsRef.current = ws;
 
       ws.onopen = async () => {
-        setState('connected');
-
         // Send setup with voice selection AND cognitive grounding context
         const grounding = buildGroundingContext();
         ws.send(JSON.stringify({
@@ -768,34 +810,10 @@ export const LivePage: React.FC<LivePageProps> = ({
           groundingContext: grounding
         }));
 
+        // Prime audio permissions and visualizer pipeline immediately so there is 0 hardware lag
         await startMicrophoneCapture();
         startVisualizerLoop();
-        setState('listening');
-
-        // If an initial inquiry starter was selected, send it to prime the AI
-        if (customInitialPrompt) {
-          setTimeout(() => {
-            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-              // Add to dialogue stream immediately
-              const nowStamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              setDialogueItems((prev) => [
-                ...prev,
-                {
-                  id: 'usr_' + Date.now(),
-                  role: 'user',
-                  text: customInitialPrompt,
-                  timestamp: nowStamp
-                }
-              ]);
-              setLastCompletedUtterance({ role: 'user', text: customInitialPrompt });
-
-              wsRef.current.send(JSON.stringify({
-                type: 'text',
-                text: customInitialPrompt
-              }));
-            }
-          }, 600);
-        }
+        // State remains in 'connecting' ("Valeria is getting ready...") until backend emits session_ready!
       };
 
       ws.onmessage = (event) => {
@@ -803,7 +821,34 @@ export const LivePage: React.FC<LivePageProps> = ({
           const data = JSON.parse(event.data);
 
           if (data.type === 'session_ready') {
+            setIsSessionReady(true);
+            isSessionReadyRef.current = true;
             setState('listening');
+            playReadyChime();
+
+            // If an inquiry starter was queued, dispatch it now that Gemini Live is live and ready
+            if (pendingInitialPromptRef.current) {
+              const promptToSend = pendingInitialPromptRef.current;
+              pendingInitialPromptRef.current = null;
+              const nowStamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              setDialogueItems((prev) => [
+                ...prev,
+                {
+                  id: 'usr_' + Date.now(),
+                  role: 'user',
+                  text: promptToSend,
+                  timestamp: nowStamp
+                }
+              ]);
+              setLastCompletedUtterance({ role: 'user', text: promptToSend });
+
+              if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                wsRef.current.send(JSON.stringify({
+                  type: 'text',
+                  text: promptToSend
+                }));
+              }
+            }
           } else if (data.type === 'audio') {
             playAudioChunk(data.audio);
           } else if (data.type === 'model_transcript_chunk') {
@@ -937,6 +982,9 @@ export const LivePage: React.FC<LivePageProps> = ({
   // End Live Voice Session
   const endLiveSession = () => {
     isSessionActiveRef.current = false;
+    isSessionReadyRef.current = false;
+    setIsSessionReady(false);
+    pendingInitialPromptRef.current = null;
     setState('idle');
     setMicVolume(0);
     setPlaybackVolume(0);
@@ -1087,26 +1135,47 @@ export const LivePage: React.FC<LivePageProps> = ({
   const stateBadge = useMemo(() => {
     switch (state) {
       case 'connecting':
-        return { label: 'Connecting Voice Bridge...', color: 'bg-amber-100 text-amber-900 border-amber-300' };
+        return { 
+          label: 'Valeria is getting ready...', 
+          color: 'bg-amber-100/90 text-amber-900 border-amber-300 ring-2 ring-amber-200/50' 
+        };
       case 'connected':
-        return { label: 'Voice Sanctuary Ready', color: 'bg-emerald-100 text-emerald-900 border-emerald-300' };
+        return { 
+          label: 'Valeria is getting ready...', 
+          color: 'bg-amber-100/90 text-amber-900 border-amber-300' 
+        };
       case 'listening':
-        return { label: isMuted ? 'Microphone Muted' : 'Listening Mindfully...', color: 'bg-amber-100 text-amber-900 border-amber-300' };
+        return { 
+          label: isMuted ? 'Microphone Muted' : 'Listening Mindfully (Speak now)', 
+          color: 'bg-emerald-100 text-emerald-900 border-emerald-300' 
+        };
       case 'speaking':
-        return { label: `Reflecting • ${selectedVoice}`, color: 'bg-indigo-100 text-indigo-900 border-indigo-300' };
+        return { 
+          label: `Reflecting • ${selectedVoice}`, 
+          color: 'bg-indigo-100 text-indigo-900 border-indigo-300' 
+        };
       case 'interrupted':
-        return { label: 'Attentive & Ready', color: 'bg-stone-200 text-stone-800 border-stone-300' };
+        return { 
+          label: 'Attentive & Ready', 
+          color: 'bg-stone-200 text-stone-800 border-stone-300' 
+        };
       case 'error':
-        return { label: 'Connection Notice', color: 'bg-rose-100 text-rose-900 border-rose-300' };
+        return { 
+          label: 'Connection Notice', 
+          color: 'bg-rose-100 text-rose-900 border-rose-300' 
+        };
       default:
-        return { label: 'Voice Sanctuary Idle', color: 'bg-stone-100 text-stone-700 border-stone-200' };
+        return { 
+          label: 'Voice Sanctuary Idle', 
+          color: 'bg-stone-100 text-stone-700 border-stone-200' 
+        };
     }
   }, [state, isMuted, selectedVoice]);
 
   const activeVoiceObj = AVAILABLE_VOICES.find((v) => v.name === selectedVoice) || AVAILABLE_VOICES[0];
 
   return (
-    <div id="Valeria-live-workspace" className="min-h-[calc(100vh-4rem)] bg-stone-50/70 p-4 sm:p-6 lg:p-8 flex flex-col justify-between max-w-7xl mx-auto">
+    <div id="Valeria-live-workspace" className="min-h-[calc(100vh-4rem)] bg-stone-50/70 p-4 flex flex-col justify-between max-w-7xl mx-auto">
       
       {/* Top Header & Cognitive Grounding Bar */}
       <div id="live-header-bar" className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-stone-200/80">
@@ -1288,9 +1357,19 @@ export const LivePage: React.FC<LivePageProps> = ({
               }}
             />
 
-            {/* Live Subtitle Focus HUD (Permanently visible and doesn't abruptly vanish) */}
-            <div id="live-subtitle-hud" className="w-full max-w-lg mt-3 px-4 py-2.5 rounded-xl bg-stone-50/90 border border-stone-200/80 text-center min-h-[46px] flex items-center justify-center">
-              {activeUserLiveText ? (
+            {/* Live Subtitle Focus HUD (Permanently visible and communicates session preparation state) */}
+            <div id="live-subtitle-hud" className="w-full max-w-lg mt-3 px-4 py-2.5 rounded-xl bg-stone-50/90 border border-stone-200/80 text-center min-h-[50px] flex items-center justify-center transition-all duration-300">
+              {state === 'connecting' || (state === 'connected' && !isSessionReady) ? (
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-1.5 sm:gap-2 text-amber-950 animate-pulse">
+                  <div className="flex items-center gap-1.5 font-semibold text-xs sm:text-sm text-amber-900">
+                    <Sparkles className="w-4 h-4 text-amber-600 animate-spin shrink-0" />
+                    <span>Valeria is waking up and preparing your session...</span>
+                  </div>
+                  <span className="text-[11px] sm:text-xs text-stone-500 font-sans">
+                    Please hold on a moment before speaking.
+                  </span>
+                </div>
+              ) : activeUserLiveText ? (
                 <p className="text-xs sm:text-sm text-amber-950 font-medium animate-in fade-in duration-150">
                   <span className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider mr-1.5">You:</span>
                   "{activeUserLiveText}"
@@ -1304,6 +1383,11 @@ export const LivePage: React.FC<LivePageProps> = ({
                 <p className="text-xs text-stone-600">
                   <span className="text-[10px] font-semibold text-stone-400 uppercase mr-1">Last {lastCompletedUtterance.role === 'user' ? 'thought' : 'reflection'}:</span>
                   <span className="font-serif italic text-stone-700">"{lastCompletedUtterance.text.slice(0, 110)}{lastCompletedUtterance.text.length > 110 ? '...' : ''}"</span>
+                </p>
+              ) : state === 'listening' ? (
+                <p className="text-xs sm:text-sm text-emerald-900 font-medium animate-in fade-in duration-200 flex items-center justify-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping shrink-0" />
+                  <span>Valeria is ready and listening — speak naturally whenever you're ready.</span>
                 </p>
               ) : (
                 <p className="text-xs text-stone-400 font-serif italic">
@@ -1505,97 +1589,120 @@ export const LivePage: React.FC<LivePageProps> = ({
             </div>
 
             <div className="mt-3 space-y-3">
-              {/* Document Grounding Selector */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label htmlFor="grounding-document-select" className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider block">
-                    Ground in Document Intelligence:
-                  </label>
-                  {selectedDocId && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedDocId(null)}
-                      className="text-[10px] text-stone-400 hover:text-stone-600 transition cursor-pointer"
-                    >
-                      Clear document
-                    </button>
-                  )}
+              {docsLoading ? (
+                <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200/90 text-xs text-stone-500 italic flex items-center gap-2">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                  <span>Loading workspace documents...</span>
                 </div>
-
-                {docsLoading ? (
-                  <div className="text-xs text-stone-400 italic">Loading workspace documents...</div>
-                ) : userDocuments.length > 0 ? (
-                  <>
-                    <select
-                      id="grounding-document-select"
-                      value={selectedDocId || ''}
-                      onChange={(e) => setSelectedDocId(e.target.value || null)}
-                      className="w-full text-xs bg-stone-50 border border-stone-200 rounded-lg p-2 text-stone-800 focus:ring-1 focus:ring-amber-500 font-medium"
-                    >
-                      <option value="">No document (General Reflection)</option>
-                      {userDocuments.map((doc) => (
-                        <option key={doc.id} value={doc.id}>
-                          📄 {doc.fileName} ({doc.pageCount || 1} pgs{doc.chunkCount ? ` • ${doc.chunkCount} chunks` : ''})
-                        </option>
-                      ))}
-                    </select>
-
-                    {/* Active Grounded Document Summary Card & Context Indicator */}
-                    {activeDoc && (
-                      <div id="active-grounding-doc-card" className="p-3 bg-stone-50/90 rounded-xl border border-stone-200/90 space-y-2.5">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-start gap-2.5 min-w-0">
-                            <div className="w-8 h-8 rounded-lg bg-amber-100/90 border border-amber-200/80 text-amber-900 flex items-center justify-center shrink-0 mt-0.5">
-                              <FileText className="w-4 h-4" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="text-xs font-serif font-bold text-stone-900 truncate leading-snug" title={activeDoc.fileName}>
-                                {activeDoc.fileName}
-                              </div>
-                              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5 text-[10px] font-mono text-stone-500">
-                                <span>{activeDoc.pageCount || 1} {(activeDoc.pageCount || 1) === 1 ? 'page' : 'pages'}</span>
-                                <span>•</span>
-                                <span>{activeDoc.chunkCount || selectedDocChunks.length || 0} chunks</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Indexed Badge */}
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-medium bg-emerald-50 text-emerald-800 border border-emerald-200 shrink-0">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                            <span>Indexed</span>
-                          </span>
+              ) : userDocuments.length > 0 ? (
+                /* Unified Extended Active Grounding Document Card with integrated select option */
+                <div id="active-grounding-doc-card" className="p-3.5 bg-stone-50/90 rounded-xl border border-stone-200/90 space-y-3">
+                  {/* Card Header & Status */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      <div className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 mt-0.5 transition-colors ${
+                        activeDoc
+                          ? 'bg-amber-100/90 border-amber-200/80 text-amber-900'
+                          : 'bg-stone-100 border-stone-200 text-stone-600'
+                      }`}>
+                        {activeDoc ? <FileText className="w-4 h-4" /> : <Brain className="w-4 h-4 text-stone-500" />}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-serif font-bold text-stone-900 truncate leading-snug" title={activeDoc ? activeDoc.fileName : 'General Cognitive Reflection'}>
+                          {activeDoc ? activeDoc.fileName : 'General Cognitive Reflection'}
                         </div>
-
-                        {/* Context Indicator (Requirement 5) */}
-                        <div className="pt-2 border-t border-stone-200/60 flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5 text-[11px] text-stone-600 font-medium">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 animate-pulse"></span>
-                            <span>Conversation grounded in this document</span>
-                          </div>
-                          {selectedDocChunks.length > 0 && (
-                            <span className="text-[10px] font-mono text-emerald-700 font-medium shrink-0">
-                              {selectedDocChunks.length} sections ready
-                            </span>
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5 text-[10px] font-mono text-stone-500">
+                          {activeDoc ? (
+                            <>
+                              <span>{activeDoc.pageCount || 1} {(activeDoc.pageCount || 1) === 1 ? 'page' : 'pages'}</span>
+                              <span>•</span>
+                              <span>{activeDoc.chunkCount || selectedDocChunks.length || 0} chunks</span>
+                            </>
+                          ) : (
+                            <span>Grounded in memory & cognitive patterns</span>
                           )}
                         </div>
                       </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="text-xs text-stone-500 bg-stone-50 p-2.5 rounded-lg border border-stone-200 flex items-center justify-between">
-                    <span>No uploaded PDFs in workspace yet.</span>
-                    {onNavigate && (
-                      <button
-                        onClick={() => onNavigate('/documents')}
-                        className="text-amber-700 font-semibold hover:underline cursor-pointer"
+                    </div>
+
+                    {/* Status Badge & Clear Option */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {activeDoc ? (
+                        <>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-medium bg-emerald-50 text-emerald-800 border border-emerald-200">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            <span>Indexed</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDocId(null)}
+                            title="Detach document and return to general reflection"
+                            className="px-1.5 py-0.5 text-[10px] font-medium text-stone-400 hover:text-rose-600 hover:bg-rose-50 rounded border border-transparent hover:border-rose-200 transition cursor-pointer"
+                          >
+                            Detach
+                          </button>
+                        </>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-medium bg-stone-100 text-stone-600 border border-stone-200">
+                          <span>Archive Mode</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Integrated Document Selection Control */}
+                  <div className="pt-2 border-t border-stone-200/70 space-y-1.5">
+                    <label htmlFor="grounding-document-select" className="text-[10px] font-semibold text-stone-500 uppercase tracking-wider block">
+                      {activeDoc ? 'Switch Grounding Document:' : 'Attach Document for Live Grounding:'}
+                    </label>
+                    <div className="relative">
+                      <select
+                        id="grounding-document-select"
+                        value={selectedDocId || ''}
+                        onChange={(e) => setSelectedDocId(e.target.value || null)}
+                        className="w-full text-xs bg-white border border-stone-200 hover:border-stone-300 rounded-lg py-2 pl-2.5 pr-8 text-stone-800 focus:outline-hidden focus:ring-1 focus:ring-amber-500 font-medium shadow-2xs transition-colors cursor-pointer appearance-none"
                       >
-                        Upload PDF →
-                      </button>
+                        <option value="">No document (General Archive Reflection)</option>
+                        {userDocuments.map((doc) => (
+                          <option key={doc.id} value={doc.id}>
+                            📄 {doc.fileName} ({doc.pageCount || 1} pgs{doc.chunkCount ? ` • ${doc.chunkCount} chunks` : ''})
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="w-3.5 h-3.5 text-stone-400 pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2" />
+                    </div>
+                  </div>
+
+                  {/* Context Indicator Footer */}
+                  <div className="pt-2 border-t border-stone-200/60 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-[11px] text-stone-600 font-medium truncate">
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${activeDoc ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`}></span>
+                      <span className="truncate">
+                        {activeDoc
+                          ? 'Conversation grounded in this document'
+                          : 'Reflecting across thoughts & long-term patterns'}
+                      </span>
+                    </div>
+                    {activeDoc && selectedDocChunks.length > 0 && (
+                      <span className="text-[10px] font-mono text-emerald-700 font-medium shrink-0">
+                        {selectedDocChunks.length} sections ready
+                      </span>
                     )}
                   </div>
-                )}
-              </div>
+                </div>
+              ) : (
+                <div className="text-xs text-stone-500 bg-stone-50 p-3 rounded-xl border border-stone-200 flex items-center justify-between">
+                  <span>No uploaded PDFs in workspace yet.</span>
+                  {onNavigate && (
+                    <button
+                      onClick={() => onNavigate('/documents')}
+                      className="text-amber-700 font-semibold hover:underline cursor-pointer"
+                    >
+                      Upload PDF →
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

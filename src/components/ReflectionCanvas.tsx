@@ -113,13 +113,13 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
     entryRef.current = entry;
   }, [entry]);
 
-  // Synchronize state if initialEntry changes
+  // Synchronize state only when switching to a different reflection entry ID
   useEffect(() => {
-    if (initialEntry) {
+    if (initialEntry && initialEntry.id !== entryRef.current.id) {
       setEntry(initialEntry);
       entryRef.current = initialEntry;
     }
-  }, [initialEntry]);
+  }, [initialEntry?.id]);
 
   // Is the mode locked for this reflection session?
   const isModeLocked = entry.messages.length > 0;
@@ -132,7 +132,7 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
 
   // Handle Intent Change (locked after first message)
   const handleIntentChange = (newIntent: ReflectionIntent) => {
-    if (isModeLocked) return; // Locked once conversation starts
+    if (isModeLocked) return;
     setEntry(prev => {
       const updated = {
         ...prev,
@@ -153,55 +153,64 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
     } catch (err: any) {
       console.error('Auto-save failed:', err);
       setSaveStatus('error');
-      setErrorMessage('Auto-save encountered an issue. Changes will retry.');
     } finally {
       setLocalSaving(false);
     }
   };
 
-  // Auto-save title changes with debounce
+  // Debounced title update
   const handleTitleChange = (newTitle: string) => {
-    const updated = { ...entry, title: newTitle, updatedAt: new Date().toISOString() };
-    setEntry(updated);
-
+    setEntry(prev => ({ ...prev, title: newTitle }));
     if (titleDebounceRef.current) {
       clearTimeout(titleDebounceRef.current);
     }
     titleDebounceRef.current = setTimeout(() => {
-      triggerAutoSave(updated);
+      triggerAutoSave({ ...entryRef.current, title: newTitle });
     }, 1000);
   };
 
-  // Submit a turn to Gemini with Server-Sent Events (SSE) Streaming
-  const handleSendMessage = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const content = inputMessage.trim();
-    if (!content || isGenerating) return;
+  // Textarea auto-resize
+  const handleTextareaInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInputMessage(e.target.value);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 180)}px`;
+    }
+  };
 
-    setErrorMessage(null);
+  // Submit message to Gemini Stream API
+  const handleSendMessage = async () => {
+    const trimmed = inputMessage.trim();
+    if (!trimmed || isGenerating) return;
+
+    const userMsgId = 'msg_user_' + Date.now();
     const userMsg: ChatMessage = {
-      id: 'msg_' + Date.now(),
+      id: userMsgId,
       role: 'user',
-      content,
+      content: trimmed,
       timestamp: new Date().toISOString()
     };
 
     const updatedMessages = [...entry.messages, userMsg];
-    
-    // Auto-derive a sensible title from the first prompt if default
-    let updatedTitle = entry.title;
-    if (entry.title === 'New Reflection' && content.length > 0) {
-      updatedTitle = content.slice(0, 45) + (content.length > 45 ? '...' : '');
-    }
-
     const nextEntryState: JournalEntry = {
       ...entry,
-      title: updatedTitle,
       messages: updatedMessages,
       updatedAt: new Date().toISOString()
     };
 
-    const aiMsgId = 'msg_' + Date.now() + '_ai';
+    setEntry(nextEntryState);
+    setInputMessage('');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+    setIsGenerating(true);
+    setErrorMessage(null);
+
+    // Auto-save user message
+    triggerAutoSave(nextEntryState);
+
+    // Placeholder for AI streaming
+    const aiMsgId = 'msg_ai_' + (Date.now() + 1);
     const initialAiMsg: ChatMessage = {
       id: aiMsgId,
       role: 'model',
@@ -209,46 +218,38 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
       timestamp: new Date().toISOString()
     };
 
-    // Show initial AI message container immediately
-    const entryWithPlaceholder: JournalEntry = {
-      ...nextEntryState,
-      messages: [...updatedMessages, initialAiMsg]
-    };
-
-    setEntry(entryWithPlaceholder);
-    setInputMessage('');
-    setIsGenerating(true);
-
-    // Immediate auto-save of the user message state in background
-    triggerAutoSave(nextEntryState);
+    setEntry(prev => ({
+      ...prev,
+      messages: [...prev.messages, initialAiMsg]
+    }));
 
     try {
-      const resp = await fetch('/api/reflect/chat', {
+      const response = await fetch('/api/reflect/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: updatedMessages,
-          intent: nextEntryState.intent
+          intent: entry.intent,
+          title: entry.title
         })
       });
 
-      if (!resp.ok) {
-        const errorData = await resp.json().catch(() => ({}));
-        throw new Error(errorData.error || `Server responded with status ${resp.status}`);
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Server returned ${response.status}: ${errText}`);
       }
 
-      if (!resp.body) {
-        throw new Error('ReadableStream not supported by browser.');
+      if (!response.body) {
+        throw new Error('No response body received from server.');
       }
 
-      const reader = resp.body.getReader();
+      const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let streamedAccumulatedText = '';
+      let accumulatedText = '';
       let buffer = '';
-      let finalActions: DetectedAction[] | undefined = undefined;
 
       while (true) {
-        const { done, value } = await reader.read();
+        const { value, done } = await reader.read();
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
@@ -256,28 +257,24 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith('data:')) continue;
-          const dataStr = trimmed.replace(/^data:\s*/, '');
-          if (!dataStr) continue;
+          if (!line.startsWith('data: ')) continue;
+          const jsonStr = line.replace('data: ', '').trim();
+          if (!jsonStr) continue;
 
           try {
-            const event = JSON.parse(dataStr);
+            const event = JSON.parse(jsonStr);
             if (event.chunk) {
-              streamedAccumulatedText += event.chunk;
-              setIsGenerating(false); // First token arrived! Switch off contemplation badge immediately
-
-              // Strip actions block in-flight so raw actions JSON is not exposed to the reader during generation
-              const liveDisplay = streamedAccumulatedText.replace(/```actions[\s\S]*$/i, '').trim();
-              setEntry(prev => ({
-                ...prev,
-                messages: prev.messages.map(m => m.id === aiMsgId ? { ...m, content: liveDisplay || streamedAccumulatedText } : m)
-              }));
+              accumulatedText += event.chunk;
+              setEntry(prev => {
+                const msgs = prev.messages.map(m => 
+                  m.id === aiMsgId ? { ...m, content: accumulatedText } : m
+                );
+                return { ...prev, messages: msgs };
+              });
             } else if (event.done) {
-              const finalContent = event.content || streamedAccumulatedText.replace(/```actions[\s\S]*?```/gi, '').trim();
-              if (Array.isArray(event.actions) && event.actions.length > 0) {
-                finalActions = event.actions;
-              }
+              const finalContent = event.fullText || accumulatedText;
+              const finalActions: DetectedAction[] = event.actions || [];
+
               const finalAiMsg: ChatMessage = {
                 id: aiMsgId,
                 role: 'model',
@@ -298,51 +295,45 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
             } else if (event.error) {
               throw new Error(event.error);
             }
-          } catch (jsonErr: any) {
-            if (jsonErr.message && !jsonErr.message.includes('JSON')) {
-              throw jsonErr;
-            }
+          } catch (e: any) {
+            console.error('Error parsing SSE chunk:', e);
           }
         }
       }
     } catch (err: any) {
-      console.error('Error contacting Gemini streaming endpoint:', err);
-      setErrorMessage(err?.message || 'Unable to reach Gemini AI. Please check your connection or API status.');
-      // Remove empty placeholder message on error if no content was received
+      console.error('Error in chat generation:', err);
+      setIsGenerating(false);
+      setErrorMessage(err?.message || 'Failed to connect to reflection assistant.');
+      
+      // Rollback placeholder message if nothing arrived
       setEntry(prev => ({
         ...prev,
-        messages: prev.messages.filter(m => m.id !== aiMsgId || m.content.length > 0)
+        messages: prev.messages.filter(m => m.id !== aiMsgId)
       }));
-      setIsGenerating(false);
-    } finally {
-      setIsGenerating(false);
     }
   };
 
-  // Handle action updates (e.g. Google Calendar event created or undone)
+  // Update an individual action card
   const handleUpdateAction = (messageId: string, updatedAction: DetectedAction) => {
     setEntry(prev => {
       const updatedMessages = prev.messages.map(msg => {
         if (msg.id !== messageId || !msg.actions) return msg;
-        const updatedActions = msg.actions.map(act => act.id === updatedAction.id ? updatedAction : act);
-        return {
-          ...msg,
-          actions: updatedActions
-        };
+        const newActions = msg.actions.map(a => a.id === updatedAction.id ? updatedAction : a);
+        return { ...msg, actions: newActions };
       });
-      const updatedEntry: JournalEntry = {
+      const updated = {
         ...prev,
         messages: updatedMessages,
         updatedAt: new Date().toISOString()
       };
-      triggerAutoSave(updatedEntry);
-      return updatedEntry;
+      triggerAutoSave(updated);
+      return updated;
     });
   };
 
-  // Synthesize session & extract Cognitive Insights
+  // Request Cognitive Synthesis (Summary, Takeaways, Mood, Key Themes)
   const handleSynthesize = async () => {
-    if (entry.messages.length === 0 || isSynthesizing) return;
+    if (entry.messages.length < 2 || isSynthesizing) return;
     setIsSynthesizing(true);
     setErrorMessage(null);
 
@@ -352,30 +343,28 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: entry.messages,
-          intent: entry.intent
+          title: entry.title
         })
       });
 
       if (!resp.ok) {
-        throw new Error('Failed to generate cognitive synthesis.');
+        const errorData = await resp.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to synthesize cognitive insights.');
       }
 
       const data = await resp.json();
-      const synthesis = data.synthesis || {};
+      const insights: CognitiveInsight = data.insights || {
+        mood: 'Reflective',
+        keyThemes: [],
+        takeaways: [],
+        actionItems: []
+      };
 
       const finalEntry: JournalEntry = {
         ...entry,
-        title: synthesis.title || entry.title,
-        summary: synthesis.summary || entry.summary,
-        insights: {
-          mood: synthesis.mood,
-          keyThemes: synthesis.keyThemes || [],
-          cognitiveBiases: synthesis.cognitiveBiases || [],
-          takeaways: synthesis.takeaways || [],
-          actionItems: synthesis.actionItems || [],
-          suggestedPromptForNextTime: synthesis.suggestedPromptForNextTime
-        },
-        tags: synthesis.keyThemes || entry.tags || [],
+        summary: data.summary || entry.summary,
+        insights,
+        tags: Array.from(new Set([...(entry.tags || []), ...(insights.keyThemes || [])])),
         updatedAt: new Date().toISOString()
       };
 
@@ -394,7 +383,7 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
   };
 
   return (
-    <div id="reflection-canvas" className="flex flex-col h-[calc(100vh-4rem)] max-w-6xl mx-auto w-full bg-white sm:rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
+    <div id="reflection-canvas" className="flex flex-col h-[calc(100vh-4rem)] max-w-5xl mx-auto w-full bg-white sm:rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
       {/* Top Header bar */}
       <div className="px-4 py-3.5 border-b border-stone-200/90 bg-stone-50/80 flex flex-wrap items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-3 min-w-0">
@@ -402,7 +391,7 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
             id="back-to-dashboard-btn"
             onClick={onClose}
             className="p-1.5 rounded-lg hover:bg-stone-200 text-stone-600 transition cursor-pointer"
-            title="Back to Dashboard"
+            title="Back to Reflections"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
@@ -525,7 +514,7 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
               </div>
               <div className="space-y-1">
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-stone-500">
-                  Current Mode: {INTENT_OPTIONS.find(i => i.id === entry.intent)?.label}
+                  Cognitive Journal: {INTENT_OPTIONS.find(i => i.id === entry.intent)?.label}
                 </h4>
                 <p className="text-xs text-stone-600">
                   {INTENT_OPTIONS.find(i => i.id === entry.intent)?.description}
@@ -548,8 +537,12 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
                   ].map((promptIdea, idx) => (
                     <button
                       key={idx}
-                      onClick={() => setInputMessage(promptIdea)}
-                      className="text-xs text-left px-3 py-2 rounded-lg bg-white border border-stone-200 hover:border-stone-400 text-stone-700 transition cursor-pointer shadow-xs"
+                      type="button"
+                      onClick={() => {
+                        setInputMessage(promptIdea);
+                        textareaRef.current?.focus();
+                      }}
+                      className="px-3 py-1.5 rounded-full bg-white hover:bg-stone-100 text-stone-600 hover:text-stone-900 border border-stone-200 text-xs transition shadow-2xs text-left cursor-pointer"
                     >
                       {promptIdea}
                     </button>
@@ -558,130 +551,120 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
               </div>
             )}
 
-            {/* Message History */}
-            {entry.messages
-              .filter(msg => msg.role === 'user' || (msg.content && msg.content.trim().length > 0) || (msg.actions && msg.actions.length > 0))
-              .map((msg, index) => (
-              <div
-                key={msg.id || index}
-                className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                {msg.role === 'model' && (
-                  <div className="w-8 h-8 rounded-full bg-stone-900 text-stone-100 flex items-center justify-center shrink-0 mt-1 shadow-xs">
-                    <BrainCircuit className="w-4 h-4 text-amber-300" />
-                  </div>
-                )}
-
+            {/* Message Stream */}
+            {entry.messages.map((msg) => {
+              const isUser = msg.role === 'user';
+              return (
                 <div
-                  className={`max-w-2xl rounded-2xl p-4 text-sm leading-relaxed ${
-                    msg.role === 'user'
-                      ? 'bg-stone-900 text-stone-50 rounded-tr-xs shadow-xs'
-                      : 'bg-white border border-stone-200/90 text-stone-800 rounded-tl-xs shadow-xs prose prose-stone max-w-none'
-                  }`}
+                  key={msg.id}
+                  className={`flex flex-col space-y-2 ${isUser ? 'items-end' : 'items-start'}`}
                 >
-                  {msg.role === 'user' ? (
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
-                  ) : (
-                    <>
-                      <div className="prose prose-stone text-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1">
-                        <ReactMarkdown>{msg.content}</ReactMarkdown>
-                      </div>
-                      {msg.actions && msg.actions.length > 0 && (
-                        <ActionCards 
-                          actions={msg.actions} 
-                          messageId={msg.id} 
-                          onUpdateAction={(updatedAct) => handleUpdateAction(msg.id, updatedAct)} 
-                        />
-                      )}
-                    </>
-                  )}
+                  <div className="flex items-center gap-2 px-1">
+                    <span className="text-[11px] font-mono text-stone-400">
+                      {isUser ? 'You' : 'Valeria AI'}
+                    </span>
+                    <span className="text-[10px] font-mono text-stone-300">
+                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+
                   <div
-                    className={`text-[10px] mt-2 font-mono ${
-                      msg.role === 'user' ? 'text-stone-400 text-right' : 'text-stone-400'
+                    className={`max-w-[90%] sm:max-w-[82%] rounded-2xl p-4 sm:p-5 text-sm leading-relaxed ${
+                      isUser
+                        ? 'bg-stone-900 text-stone-50 rounded-tr-xs shadow-xs'
+                        : 'bg-white text-stone-900 border border-stone-200/90 rounded-tl-xs shadow-xs prose prose-stone max-w-none'
                     }`}
                   >
-                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {isUser ? (
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                    ) : (
+                      <div className="markdown-body">
+                        <ReactMarkdown>{msg.content || '...'}</ReactMarkdown>
+                      </div>
+                    )}
                   </div>
-                </div>
-              </div>
-            ))}
 
-            {/* AI thinking state */}
-            {isGenerating && (
-              <div id="ai-contemplating-indicator" className="flex gap-3 justify-start items-center">
-                <div className="w-8 h-8 rounded-full bg-stone-900 text-stone-100 flex items-center justify-center shrink-0 shadow-xs">
-                  <BrainCircuit className="w-4 h-4 text-amber-300" />
+                  {/* Detected Action Cards for Calendar & Maps */}
+                  {!isUser && msg.actions && msg.actions.length > 0 && (
+                    <div className="w-full max-w-[90%] sm:max-w-[82%] pt-1">
+                      <ActionCards
+                        actions={msg.actions}
+                        messageId={msg.id}
+                        onUpdateAction={(updated) => handleUpdateAction(msg.id, updated)}
+                      />
+                    </div>
+                  )}
                 </div>
-                <div className="p-3.5 rounded-2xl bg-white border border-stone-200 text-stone-500 text-xs flex items-center gap-2 shadow-xs">
-                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                  <span className="font-serif italic text-stone-600">Valeria is contemplating...</span>
-                </div>
-              </div>
-            )}
+              );
+            })}
 
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Bottom input area */}
-          <div className="max-w-3xl mx-auto w-full pt-2">
-            <form onSubmit={handleSendMessage} className="relative">
+          {/* Bottom Chat Input Bar */}
+          <div className="pt-3 max-w-3xl mx-auto w-full">
+            <div className="relative flex items-end rounded-2xl bg-white border border-stone-300 focus-within:border-stone-500 focus-within:ring-2 focus-within:ring-stone-900/10 shadow-xs transition p-2">
               <textarea
                 ref={textareaRef}
-                id="reflection-prompt-textarea"
-                rows={2}
+                id="reflection-chat-input"
+                rows={1}
                 value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
+                onChange={handleTextareaInput}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     handleSendMessage();
                   }
                 }}
-                placeholder="Share your raw thought, dilemma, or reflection... (Press Enter to send)"
-                className="w-full pl-4 pr-12 py-3 rounded-xl border border-stone-300 bg-white text-stone-900 text-sm focus:outline-hidden focus:ring-2 focus:ring-stone-400 shadow-xs resize-none placeholder:text-stone-400"
+                placeholder="Explore your thoughts with Valeria (Shift+Enter for newline)..."
+                disabled={isGenerating}
+                className="flex-1 max-h-44 min-h-[44px] px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 bg-transparent border-0 focus:outline-hidden resize-none"
               />
-              <button
-                type="submit"
-                id="submit-prompt-btn"
-                disabled={!inputMessage.trim() || isGenerating}
-                className="absolute right-2.5 bottom-3.5 p-2 rounded-lg bg-stone-900 text-stone-50 hover:bg-stone-800 active:scale-95 transition disabled:opacity-40 cursor-pointer shadow-xs"
-                title="Send to Gemini"
-              >
-                <Send className="w-4 h-4" />
-              </button>
-            </form>
-            <div className="flex items-center justify-between text-[11px] text-stone-400 px-1 pt-1.5">
-              <span>Shift + Enter for new line</span>
-              <span>Gemini 3.6 Flash Active</span>
+
+              <div className="flex items-center gap-1.5 pl-2 pb-1 shrink-0">
+                <button
+                  type="button"
+                  id="send-reflection-message-btn"
+                  onClick={handleSendMessage}
+                  disabled={!inputMessage.trim() || isGenerating}
+                  className="p-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 disabled:opacity-30 text-white transition shadow-2xs cursor-pointer"
+                  title="Send message"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </div>
             </div>
+            <p className="text-[10px] text-center font-mono text-stone-400 mt-2">
+              Private AI cognitive conversation. Thoughts, decisions, and goals are securely protected.
+            </p>
           </div>
         </div>
 
-        {/* Cognitive Insights Panel (visible if synthesized or present) */}
+        {/* Right Sidebar: Cognitive Synthesis Insights */}
         {entry.insights && (
-          <div className="hidden lg:flex flex-col w-80 border-l border-stone-200 bg-white overflow-y-auto p-5 shrink-0 space-y-5">
-            <div className="flex items-center gap-2 pb-3 border-b border-stone-200">
-              <Sparkles className="w-4 h-4 text-amber-600" />
-              <h3 className="font-serif font-bold text-sm text-stone-900">Cognitive Synthesis</h3>
+          <div className="hidden lg:flex flex-col w-80 bg-white border-l border-stone-200/90 p-5 overflow-y-auto space-y-5">
+            <div className="flex items-center gap-2 pb-3 border-b border-stone-100">
+              <Sparkles className="w-4 h-4 text-amber-500" />
+              <h4 className="font-serif font-bold text-sm text-stone-900">Cognitive Synthesis</h4>
             </div>
-
-            {/* Mood badge */}
-            {entry.insights.mood && (
-              <div className="space-y-1">
-                <span className="text-[11px] font-mono text-stone-500 uppercase tracking-wider">Tone & Mood</span>
-                <div className="p-2 rounded-lg bg-stone-100 text-xs font-medium text-stone-800 border border-stone-200/80">
-                  {entry.insights.mood}
-                </div>
-              </div>
-            )}
 
             {/* Executive Summary */}
             {entry.summary && (
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <span className="text-[11px] font-mono text-stone-500 uppercase tracking-wider">Executive Summary</span>
-                <p className="text-xs text-stone-600 leading-relaxed bg-stone-50 p-2.5 rounded-lg border border-stone-200/80">
+                <p className="text-xs text-stone-700 leading-relaxed bg-stone-50 p-3 rounded-xl border border-stone-200/70">
                   {entry.summary}
                 </p>
+              </div>
+            )}
+
+            {/* Mood & Tone */}
+            {entry.insights.mood && (
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-mono text-stone-500 uppercase tracking-wider">Observed Mindset</span>
+                <div className="inline-block px-2.5 py-1 rounded-md bg-stone-100 text-stone-800 text-xs font-semibold">
+                  {entry.insights.mood}
+                </div>
               </div>
             )}
 
@@ -691,8 +674,8 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
                 <span className="text-[11px] font-mono text-stone-500 uppercase tracking-wider">Key Themes</span>
                 <div className="flex flex-wrap gap-1.5">
                   {entry.insights.keyThemes.map((theme, i) => (
-                    <span key={i} className="text-[11px] px-2 py-0.5 bg-stone-100 border border-stone-200 rounded-md text-stone-700">
-                      #{theme}
+                    <span key={i} className="px-2 py-0.5 rounded-md bg-stone-100 text-stone-700 text-xs font-medium">
+                      {theme}
                     </span>
                   ))}
                 </div>

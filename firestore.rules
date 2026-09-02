@@ -1,15 +1,88 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // User profile isolation
+    // User profile isolation & private AI reflections
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
       
-      // User interactions, journal entries, cognitive patterns, and memory subcollections
+      // Private Cognitive Reflections (Owner Only)
+      match /interactions/{interactionId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Cognitive Patterns, Weekly Digests, Documents, and Chunks
+      match /patterns/{patternId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      match /weeklyDigests/{weekId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      match /documents/{documentId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+        match /chunks/{chunkId} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+        match /conversations/{conversationId} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+      }
+
+      // Fallback user subcollections isolation
       match /{allPaths=**} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
     }
+
+    // Public invite lookup index for fast, direct invite code resolution without collection scans
+    match /capsuleInvites/{inviteCode} {
+      // Anyone with the specific invite code can resolve it directly
+      allow get: if true;
+      // Scrapes and collection listing are forbidden
+      allow list: if false;
+      // Allow creation/updates when capsules are saved or synchronized
+      allow create, update: if true;
+      allow delete: if request.auth != null;
+    }
+
+    // Top-Level First-Class Life Archive (Memory Capsules)
+    match /memoryCapsules/{capsuleId} {
+      // Direct single-document get is allowed for any user with the direct link/ID
+      allow get: if true;
+
+      // Strictly restrict collection list queries so users only retrieve archives they created or are participants in
+      allow list: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid || 
+        (resource.data.participantIds is list && resource.data.participantIds.hasAny([request.auth.uid])) ||
+        (resource.data.contributorUids is list && resource.data.contributorUids.hasAny([request.auth.uid]))
+      );
+
+      // Authenticated users can create new archive events
+      allow create: if request.auth != null && (request.resource.data.ownerId == request.auth.uid || request.resource.data.ownerId == null);
+
+      // Host can update all fields; Guests/contributors can update counts, participant lists, or mosaic
+      allow update: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['contributorCount', 'photoCount', 'updatedAt', 'mosaic', 'participantIds', 'contributorUids'])
+      );
+
+      // Host or participant can delete the archive event
+      allow delete: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid || 
+        resource.data.ownerId == null || 
+        !('ownerId' in resource.data) ||
+        (resource.data.participantIds is list && resource.data.participantIds.hasAny([request.auth.uid]))
+      );
+
+      // Collaborative contributors subcollection
+      match /contributors/{contributorId} {
+        // Anyone with the direct link can view memories and submit their contribution
+        allow read: if request.auth != null || exists(/databases/$(database)/documents/memoryCapsules/$(capsuleId));
+        allow create, update: if request.auth != null || request.resource.data.userId == contributorId;
+        // Authenticated users or host can delete
+        allow delete: if request.auth != null;
+      }
+    }
   }
 }
+
 

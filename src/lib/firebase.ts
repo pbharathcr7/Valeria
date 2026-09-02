@@ -12,16 +12,21 @@ import {
   getFirestore, 
   Firestore,
   collection,
+  collectionGroup,
   doc,
   setDoc,
+  updateDoc,
+  arrayUnion,
   getDoc,
   getDocs,
   query,
+  where,
   orderBy,
   deleteDoc,
   serverTimestamp,
   Timestamp
 } from 'firebase/firestore';
+import { MemoryCapsule, CapsuleContributor } from '../types';
 
 // Clean helper to sanitize undefined fields before sending to Firestore
 export function sanitizePayload<T extends Record<string, any>>(obj: T): T {
@@ -291,6 +296,469 @@ export async function deleteUserDocument(userId: string, documentId: string) {
   const docRef = doc(db, 'users', userId, 'documents', documentId);
   await deleteDoc(docRef);
 }
+
+// -------------------------------------------------------------
+// First-Class Memory Capsules & Contributors Firestore Operations
+// -------------------------------------------------------------
+
+export async function saveMemoryCapsule(capsuleData: any) {
+  const { db } = await initFirebase();
+  const capsuleId = capsuleData.id || `capsule_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const capsuleRef = doc(db, 'memoryCapsules', capsuleId);
+  const ownerId = capsuleData.ownerId;
+  const initialParticipants = Array.from(
+    new Set([...(Array.isArray(capsuleData.participantIds) ? capsuleData.participantIds : []), ownerId].filter(Boolean))
+  );
+  const initialContribUids = Array.from(
+    new Set([...(Array.isArray(capsuleData.contributorUids) ? capsuleData.contributorUids : []), ownerId].filter(Boolean))
+  );
+
+  const sanitized = sanitizePayload({
+    ...capsuleData,
+    id: capsuleId,
+    participantIds: initialParticipants,
+    contributorUids: initialContribUids,
+    updatedAt: new Date().toISOString()
+  });
+  await setDoc(capsuleRef, sanitized, { merge: true });
+
+  // Maintain fast, direct public lookup index for shareable invite codes
+  if (sanitized.inviteCode) {
+    try {
+      const inviteRefUpper = doc(db, 'capsuleInvites', sanitized.inviteCode.toUpperCase());
+      await setDoc(inviteRefUpper, {
+        capsuleId: sanitized.id,
+        inviteCode: sanitized.inviteCode.toUpperCase(),
+        ownerId: sanitized.ownerId,
+        createdAt: sanitized.createdAt || new Date().toISOString()
+      }, { merge: true });
+    } catch (inviteErr) {
+      console.warn('Could not index capsule invite code:', inviteErr);
+    }
+  }
+
+  return sanitized;
+}
+
+export async function loadMemoryCapsules(currentUserId?: string): Promise<MemoryCapsule[]> {
+  try {
+    // RBAC check: Unauthenticated or empty userId must never list archives
+    if (!currentUserId || !currentUserId.trim()) {
+      return [];
+    }
+
+    const { db } = await initFirebase();
+    const capsulesRef = collection(db, 'memoryCapsules');
+    const targetUid = currentUserId.trim();
+    const capsuleMap = new Map<string, MemoryCapsule>();
+
+    // 1. Fetch archives created by the user
+    try {
+      const qOwner = query(capsulesRef, where('ownerId', '==', targetUid));
+      const ownerSnap = await getDocs(qOwner);
+      ownerSnap.forEach((snap) => {
+        const data = snap.data() as Record<string, any>;
+        capsuleMap.set(snap.id, { ...data, id: snap.id } as MemoryCapsule);
+      });
+    } catch (ownerErr) {
+      console.warn('Error querying owner capsules:', ownerErr);
+    }
+
+    // 2. Fetch archives where user is explicitly in participantIds
+    try {
+      const qPart = query(capsulesRef, where('participantIds', 'array-contains', targetUid));
+      const partSnap = await getDocs(qPart);
+      partSnap.forEach((snap) => {
+        const data = snap.data() as Record<string, any>;
+        capsuleMap.set(snap.id, { ...data, id: snap.id } as MemoryCapsule);
+      });
+    } catch (partErr) {
+      console.warn('Error querying participant capsules:', partErr);
+    }
+
+    // 3. Fetch archives where user is in contributorUids
+    try {
+      const qContribUids = query(capsulesRef, where('contributorUids', 'array-contains', targetUid));
+      const contribUidsSnap = await getDocs(qContribUids);
+      contribUidsSnap.forEach((snap) => {
+        const data = snap.data() as Record<string, any>;
+        capsuleMap.set(snap.id, { ...data, id: snap.id } as MemoryCapsule);
+      });
+    } catch (contribUidsErr) {
+      console.warn('Error querying contributorUids capsules:', contribUidsErr);
+    }
+
+    // 4. Also discover any archives where the user contributed to the contributors subcollection
+    const userContributedCapsuleIds = new Set<string>();
+    try {
+      const contribGroup = collectionGroup(db, 'contributors');
+      const qContribs = query(contribGroup, where('userId', '==', targetUid));
+      const contribSnap = await getDocs(qContribs);
+      
+      const missingCapsuleIds: string[] = [];
+      contribSnap.forEach((docSnap) => {
+        // Parent path: memoryCapsules/{capsuleId}/contributors/{contribId}
+        const parentCapRef = docSnap.ref.parent.parent;
+        if (parentCapRef && parentCapRef.id) {
+          userContributedCapsuleIds.add(parentCapRef.id);
+          if (!capsuleMap.has(parentCapRef.id)) {
+            missingCapsuleIds.push(parentCapRef.id);
+          }
+        }
+      });
+
+      // Fetch missing parent capsules
+      if (missingCapsuleIds.length > 0) {
+        const fetchMissingPromises = missingCapsuleIds.map(async (capId) => {
+          try {
+            const capDocRef = doc(db, 'memoryCapsules', capId);
+            const capSnap = await getDoc(capDocRef);
+            if (capSnap.exists()) {
+              const data = capSnap.data() as Record<string, any>;
+              capsuleMap.set(capSnap.id, { ...data, id: capSnap.id } as MemoryCapsule);
+            }
+          } catch (e) {
+            console.warn(`Could not fetch contributed capsule ${capId}:`, e);
+          }
+        });
+        await Promise.all(fetchMissingPromises);
+      }
+    } catch (groupErr) {
+      console.warn('Could not query contributor subcollection group:', groupErr);
+    }
+
+    // 5. Strictly filter to guarantee zero cross-user leakage
+    const rawCapsules = Array.from(capsuleMap.values()).filter((cap) => {
+      const isOwner = cap.ownerId === targetUid;
+      const isParticipant = Array.isArray(cap.participantIds) && cap.participantIds.includes(targetUid);
+      const isContributor = Array.isArray(cap.contributorUids) && cap.contributorUids.includes(targetUid);
+      const hasContributed = userContributedCapsuleIds.has(cap.id);
+      return isOwner || isParticipant || isContributor || hasContributed;
+    });
+
+    // Sort descending by eventDate or createdAt
+    rawCapsules.sort((a, b) => {
+      const timeA = new Date(a.createdAt || a.eventDate || 0).getTime();
+      const timeB = new Date(b.createdAt || b.eventDate || 0).getTime();
+      return timeB - timeA;
+    });
+
+    // Concurrently enrich capsules with exact real-time contributor count & photo count
+    const enrichedCapsules = await Promise.all(
+      rawCapsules.map(async (cap) => {
+        // Opportunistically ensure capsule invite is indexed
+        if (cap.inviteCode) {
+          try {
+            const inviteRef = doc(db, 'capsuleInvites', cap.inviteCode.toUpperCase());
+            setDoc(inviteRef, {
+              capsuleId: cap.id,
+              inviteCode: cap.inviteCode.toUpperCase(),
+              ownerId: cap.ownerId,
+              createdAt: cap.createdAt || new Date().toISOString()
+            }, { merge: true }).catch(() => {});
+          } catch {}
+        }
+
+        try {
+          const contribs = await loadCapsuleContributors(cap.id);
+          const trueContributorCount = contribs.length;
+          const contribPhotosCount = contribs.filter(c => Boolean(c.photoUrl)).length;
+          const truePhotoCount = contribPhotosCount + (cap.coverPhoto ? 1 : 0);
+
+          return {
+            ...cap,
+            contributorCount: trueContributorCount,
+            photoCount: truePhotoCount
+          };
+        } catch (enrichErr) {
+          console.warn(`Could not enrich counts for capsule ${cap.id}:`, enrichErr);
+          const fallbackPhotos = cap.coverPhoto ? 1 : 0;
+          return {
+            ...cap,
+            contributorCount: cap.contributorCount ?? 0,
+            photoCount: cap.photoCount ?? fallbackPhotos
+          };
+        }
+      })
+    );
+
+    return enrichedCapsules;
+  } catch (error) {
+    console.error('Failed to load Memory Capsules from Firestore:', error);
+    return [];
+  }
+}
+
+export async function loadMemoryCapsuleById(capsuleId: string): Promise<MemoryCapsule | null> {
+  try {
+    const { db } = await initFirebase();
+    const capsuleRef = doc(db, 'memoryCapsules', capsuleId);
+    const snap = await getDoc(capsuleRef);
+    if (snap.exists()) {
+      const data = snap.data() as Record<string, any>;
+      const cap = { ...data, id: snap.id } as MemoryCapsule;
+      try {
+        const contribs = await loadCapsuleContributors(capsuleId);
+        const trueContribCount = contribs.length;
+        const contribPhotos = contribs.filter(c => Boolean(c.photoUrl)).length;
+        const truePhotoCount = contribPhotos + (cap.coverPhoto ? 1 : 0);
+        return {
+          ...cap,
+          contributorCount: trueContribCount,
+          photoCount: truePhotoCount
+        };
+      } catch {
+        return cap;
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error('Failed to load Memory Capsule by ID:', error);
+    return null;
+  }
+}
+
+export async function loadMemoryCapsuleByInviteCode(inviteCode: string): Promise<MemoryCapsule | null> {
+  if (!inviteCode || !inviteCode.trim()) return null;
+  const rawCode = inviteCode.trim();
+  const normalizedCode = rawCode.toUpperCase();
+
+  try {
+    const { db } = await initFirebase();
+
+    // 1. Fast direct document lookup in capsuleInvites index (Allowed by rules for any guest/user)
+    try {
+      const inviteRefUpper = doc(db, 'capsuleInvites', normalizedCode);
+      const inviteSnapUpper = await getDoc(inviteRefUpper);
+      if (inviteSnapUpper.exists()) {
+        const inviteData = inviteSnapUpper.data() as Record<string, any>;
+        if (inviteData?.capsuleId) {
+          const cap = await loadMemoryCapsuleById(inviteData.capsuleId);
+          if (cap) return cap;
+        }
+      }
+
+      if (rawCode !== normalizedCode) {
+        const inviteRefRaw = doc(db, 'capsuleInvites', rawCode);
+        const inviteSnapRaw = await getDoc(inviteRefRaw);
+        if (inviteSnapRaw.exists()) {
+          const inviteData = inviteSnapRaw.data() as Record<string, any>;
+          if (inviteData?.capsuleId) {
+            const cap = await loadMemoryCapsuleById(inviteData.capsuleId);
+            if (cap) return cap;
+          }
+        }
+      }
+    } catch (inviteLookupErr) {
+      console.warn('Error reading capsuleInvites index:', inviteLookupErr);
+    }
+
+    // 2. Direct document read on memoryCapsules (in case the code itself is a capsule ID)
+    const directDoc = await loadMemoryCapsuleById(rawCode);
+    if (directDoc) return directDoc;
+
+    // 3. Fallback query if authorized or indexed
+    try {
+      const capsulesRef = collection(db, 'memoryCapsules');
+      const q = query(capsulesRef, where('inviteCode', '==', normalizedCode));
+      const snapshot = await getDocs(q);
+
+      let matchedDoc: MemoryCapsule | null = null;
+      if (!snapshot.empty) {
+        const snap = snapshot.docs[0];
+        const data = snap.data() as Record<string, any>;
+        matchedDoc = { ...data, id: snap.id } as MemoryCapsule;
+      } else {
+        const qRaw = query(capsulesRef, where('inviteCode', '==', rawCode));
+        const snapRaw = await getDocs(qRaw);
+        if (!snapRaw.empty) {
+          const snap = snapRaw.docs[0];
+          const data = snap.data() as Record<string, any>;
+          matchedDoc = { ...data, id: snap.id } as MemoryCapsule;
+        }
+      }
+
+      if (matchedDoc) {
+        // Backfill capsuleInvites index for future fast lookups
+        try {
+          const inviteRefUpper = doc(db, 'capsuleInvites', normalizedCode);
+          setDoc(inviteRefUpper, {
+            capsuleId: matchedDoc.id,
+            inviteCode: normalizedCode,
+            ownerId: matchedDoc.ownerId,
+            createdAt: matchedDoc.createdAt || new Date().toISOString()
+          }, { merge: true }).catch(() => {});
+        } catch {}
+
+        try {
+          const contribs = await loadCapsuleContributors(matchedDoc.id);
+          const trueContribCount = contribs.length;
+          const contribPhotos = contribs.filter(c => Boolean(c.photoUrl)).length;
+          const truePhotoCount = contribPhotos + (matchedDoc.coverPhoto ? 1 : 0);
+          return {
+            ...matchedDoc,
+            contributorCount: trueContribCount,
+            photoCount: truePhotoCount
+          };
+        } catch {
+          return matchedDoc;
+        }
+      }
+    } catch (queryErr) {
+      console.warn('Fallback query on memoryCapsules failed (likely RBAC restricted for unauthenticated guest):', queryErr);
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Failed to load Memory Capsule by invite code:', error);
+    return null;
+  }
+}
+
+export async function deleteMemoryCapsule(capsuleId: string) {
+  const { db } = await initFirebase();
+  
+  // 1. Fetch capsule to retrieve inviteCode for index cleanup
+  let inviteCode: string | undefined;
+  try {
+    const capDocRef = doc(db, 'memoryCapsules', capsuleId);
+    const snap = await getDoc(capDocRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      inviteCode = data?.inviteCode;
+    }
+  } catch (e) {
+    console.warn('Could not read capsule before deletion:', e);
+  }
+
+  // 2. Delete all subcollection contributor documents
+  try {
+    const contribRef = collection(db, 'memoryCapsules', capsuleId, 'contributors');
+    const contribSnap = await getDocs(contribRef);
+    const deletePromises = contribSnap.docs.map((cSnap) => deleteDoc(cSnap.ref));
+    await Promise.all(deletePromises);
+  } catch (contribErr) {
+    console.warn('Error deleting capsule contributors:', contribErr);
+  }
+
+  // 3. Delete invite code index if present
+  if (inviteCode) {
+    try {
+      const inviteRef = doc(db, 'capsuleInvites', inviteCode.toUpperCase());
+      await deleteDoc(inviteRef);
+    } catch (invErr) {
+      console.warn('Error deleting invite code lookup:', invErr);
+    }
+  }
+
+  // 4. Delete parent capsule record
+  const capsuleRef = doc(db, 'memoryCapsules', capsuleId);
+  await deleteDoc(capsuleRef);
+}
+
+export async function loadCapsuleContributors(capsuleIdOrOwnerId: string, legacyReflectionId?: string): Promise<CapsuleContributor[]> {
+  try {
+    const { db } = await initFirebase();
+    let contribRef;
+    if (legacyReflectionId) {
+      // Backward compatibility for legacy reflection subcollection
+      contribRef = collection(db, 'users', capsuleIdOrOwnerId, 'interactions', legacyReflectionId, 'contributors');
+    } else {
+      // First-class Memory Capsule subcollection
+      contribRef = collection(db, 'memoryCapsules', capsuleIdOrOwnerId, 'contributors');
+    }
+    const q = query(contribRef, orderBy('createdAt', 'asc'));
+    const snapshot = await getDocs(q);
+
+    const contributors: CapsuleContributor[] = [];
+    snapshot.forEach((snap) => {
+      const data = snap.data() as Record<string, any>;
+      contributors.push({ ...data, id: snap.id } as CapsuleContributor);
+    });
+    return contributors;
+  } catch (error) {
+    console.error('Failed to load capsule contributors from Firestore:', error);
+    return [];
+  }
+}
+
+export async function saveCapsuleContribution(capsuleIdOrOwnerId: string, contributionOrReflectionId: any, maybeContrib?: any) {
+  const { db } = await initFirebase();
+  let contribRef;
+  let contribution;
+  let isFirstClass = false;
+  let capsuleId = '';
+  
+  if (maybeContrib && typeof contributionOrReflectionId === 'string') {
+    // Legacy: (ownerId, reflectionId, contribution)
+    const ownerId = capsuleIdOrOwnerId;
+    const reflectionId = contributionOrReflectionId;
+    contribution = maybeContrib;
+    const contribId = contribution.id || contribution.userId;
+    contribRef = doc(db, 'users', ownerId, 'interactions', reflectionId, 'contributors', contribId);
+  } else {
+    // First-class: (capsuleId, contribution)
+    capsuleId = capsuleIdOrOwnerId;
+    isFirstClass = true;
+    contribution = contributionOrReflectionId;
+    const contribId = contribution.id || contribution.userId;
+    contribRef = doc(db, 'memoryCapsules', capsuleId, 'contributors', contribId);
+  }
+
+  const sanitized = sanitizePayload({
+    ...contribution,
+    id: contribution.id || contribution.userId,
+    updatedAt: new Date().toISOString()
+  });
+  await setDoc(contribRef, sanitized, { merge: true });
+
+  // For first-class capsule, ensure the contributor's userId is added to capsule participantIds/contributorUids
+  if (isFirstClass && capsuleId && contribution.userId) {
+    try {
+      const capsuleRef = doc(db, 'memoryCapsules', capsuleId);
+      const capSnap = await getDoc(capsuleRef);
+      if (capSnap.exists()) {
+        const capData = capSnap.data() as Record<string, any>;
+        const currentParticipants: string[] = Array.isArray(capData.participantIds)
+          ? capData.participantIds
+          : (capData.ownerId ? [capData.ownerId] : []);
+        const currentContribs: string[] = Array.isArray(capData.contributorUids)
+          ? capData.contributorUids
+          : (capData.ownerId ? [capData.ownerId] : []);
+        
+        if (!currentParticipants.includes(contribution.userId) || !currentContribs.includes(contribution.userId)) {
+          const updatedParticipants = Array.from(new Set([...currentParticipants, contribution.userId]));
+          const updatedContribs = Array.from(new Set([...currentContribs, contribution.userId]));
+          await updateDoc(capsuleRef, {
+            participantIds: updatedParticipants,
+            contributorUids: updatedContribs,
+            updatedAt: new Date().toISOString()
+          });
+        }
+      }
+    } catch (participantErr) {
+      console.warn('Could not update capsule participant list:', participantErr);
+    }
+  }
+
+  return sanitized;
+}
+
+export async function deleteCapsuleContribution(capsuleIdOrOwnerId: string, contributorIdOrReflectionId: string, maybeContribId?: string) {
+  const { db } = await initFirebase();
+  let contribRef;
+  if (maybeContribId) {
+    // Legacy: (ownerId, reflectionId, contributorId)
+    contribRef = doc(db, 'users', capsuleIdOrOwnerId, 'interactions', contributorIdOrReflectionId, 'contributors', maybeContribId);
+  } else {
+    // First-class: (capsuleId, contributorId)
+    contribRef = doc(db, 'memoryCapsules', capsuleIdOrOwnerId, 'contributors', contributorIdOrReflectionId);
+  }
+  await deleteDoc(contribRef);
+}
+
+// Legacy alias
+export const loadCapsuleEntry = loadMemoryCapsuleById;
 
 export { 
   collection, 

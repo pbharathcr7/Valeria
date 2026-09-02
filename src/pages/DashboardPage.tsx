@@ -10,14 +10,16 @@ import {
   Clock, 
   Brain, 
   Compass, 
-  CheckCircle2, 
   Flame, 
-  Tag, 
-  Trash2,
-  Lightbulb,
-  ExternalLink
+  Lightbulb
 } from 'lucide-react';
-import { JournalEntry, ReflectionIntent, UserProfile, CognitivePatternAnalysis, WeeklyDigest } from '../types';
+import { 
+  JournalEntry, 
+  ReflectionIntent, 
+  UserProfile, 
+  CognitivePatternAnalysis, 
+  WeeklyDigest
+} from '../types';
 
 interface DashboardPageProps {
   user: UserProfile;
@@ -37,7 +39,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   weeklyDigest,
   onNewReflection,
   onSelectEntry,
-  onDeleteEntry,
   onNavigate
 }) => {
   // Recent 3 reflections
@@ -128,7 +129,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             Welcome back, {user.displayName ? user.displayName.split(' ')[0] : 'Thinker'}
           </h2>
           <p className="text-xs sm:text-sm text-stone-600 max-w-xl">
-            Your private cognitive sanctuary. Reflect freely, examine thought patterns, and synthesize longitudinal insights with Gemini.
+            Your private cognitive sanctuary. Reflect freely, examine thought patterns, and synthesize longitudinal insights with Valeria AI.
           </p>
         </div>
 
@@ -287,7 +288,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               </div>
             ) : (
               <p className="text-xs text-stone-600 leading-relaxed">
-                Gemini continuously synthesizes patterns across your reflections to uncover recurring themes, unconscious friction points, and mindset growth trajectories.
+                Valeria continuously synthesizes patterns across your reflections to uncover recurring themes, unconscious friction points, and mindset growth trajectories.
               </p>
             )}
           </div>
@@ -398,9 +399,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 >
                   <div className="space-y-2.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-stone-100 text-stone-600 uppercase tracking-wider truncate">
-                        {entry.intent?.replace('_', ' ')}
-                      </span>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-stone-100 text-stone-600 uppercase tracking-wider truncate">
+                          {entry.intent?.replace('_', ' ')}
+                        </span>
+                      </div>
                       <span className="text-[11px] font-mono text-stone-400 shrink-0">
                         {formattedDate}
                       </span>

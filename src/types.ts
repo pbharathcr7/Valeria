@@ -52,6 +52,75 @@ export interface CognitiveInsight {
   suggestedPromptForNextTime?: string;
 }
 
+export interface ReflectionImage {
+  id: string;
+  url: string; // Base64 data URL (compressed)
+  caption?: string;
+  fileName?: string;
+  uploadedAt: string;
+}
+
+export interface ReflectionLocation {
+  placeName: string; // e.g. "Arashiyama Bamboo Grove"
+  address?: string; // e.g. "Kyoto, Japan"
+  latitude?: number;
+  longitude?: number;
+  mapsUrl?: string; // e.g. https://www.google.com/maps/search/?api=1&query=...
+}
+
+export interface CapsuleContributor {
+  id: string; // Contributor UID or submission ID
+  userId: string; // Firebase Auth UID of contributor
+  displayName: string;
+  memory: string; // Contributed memory / perspective
+  photos?: string[]; // Array of photo URLs
+  photoUrl?: string; // Optional single keepsake photo
+  photoCaption?: string;
+  emotion?: 'Joy' | 'Nostalgia' | 'Gratitude' | 'Adventure' | 'Love' | 'Peace' | 'Excitement' | 'Wonder' | string;
+  favoriteMoment?: string;
+  createdAt: string; // ISO string
+  updatedAt: string; // ISO string
+}
+
+export interface CapsulePerspective {
+  contributorName: string;
+  keyHighlight: string;
+  emotionalTone?: string;
+}
+
+export interface MemoryMosaic {
+  title: string;
+  narrative: string; // Cohesive synthesized storytelling across all perspectives
+  perspectives: CapsulePerspective[];
+  sharedThemes: string[];
+  collectiveTakeaways: string[];
+  timelineHighlights?: string[];
+  synthesizedAt: string;
+  modelUsed?: string;
+}
+
+export interface MemoryCapsule {
+  id: string;
+  ownerId: string;
+  ownerName: string;
+  title: string;
+  description?: string;
+  location?: ReflectionLocation;
+  coverPhoto?: string;
+  eventDate: string; // ISO date string or formatted date
+  createdAt: string; // ISO timestamp
+  updatedAt: string; // ISO timestamp
+  inviteCode: string; // Unique 6-8 character share code
+  status: 'open' | 'closed'; // Open for friends or closed
+  privacy: 'friends' | 'private' | 'public';
+  hostMemory?: string; // Optional host personal reflection
+  mosaic?: MemoryMosaic; // Synthesized AI story
+  contributorCount?: number;
+  photoCount?: number;
+  participantIds?: string[]; // UIDs of owner and contributors
+  contributorUids?: string[]; // UIDs of contributors
+}
+
 export interface JournalEntry {
   id: string;
   userId: string;
@@ -65,6 +134,10 @@ export interface JournalEntry {
   tags?: string[];
   isFavorite?: boolean;
   memoryReferences?: MemoryReference[];
+  images?: ReflectionImage[];
+  location?: ReflectionLocation;
+  linkedCapsuleId?: string; // Lightweight reference to a linked Memory Capsule
+  linkedCapsuleTitle?: string;
 }
 
 export interface UserProfile {

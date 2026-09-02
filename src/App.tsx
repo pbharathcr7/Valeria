@@ -15,25 +15,31 @@ import {
   loadCognitivePatterns,
   saveCognitivePatterns,
   loadWeeklyDigest,
-  saveWeeklyDigest
+  saveWeeklyDigest,
+  loadMemoryCapsules
 } from './lib/firebase';
 import { LandingPage } from './components/LandingPage';
 import { AppLayout } from './components/AppLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { ReflectionsPage } from './pages/ReflectionsPage';
+import { MemoryCapsulesPage } from './pages/MemoryCapsulesPage';
+import { CapsuleDetailPage } from './pages/CapsuleDetailPage';
+import { CapsuleGuestView } from './components/CapsuleGuestView';
 import { CognitiveMemoryPage } from './pages/CognitiveMemoryPage';
 import { WeeklyInsightsPage } from './pages/WeeklyInsightsPage';
 import { CalendarPlacesPage } from './pages/CalendarPlacesPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { DocumentsPage } from './pages/DocumentsPage';
 import { LivePage } from './pages/LivePage';
+import { MemoriesPage } from './pages/MemoriesPage';
 import { ReflectionCanvas } from './components/ReflectionCanvas';
 import { 
   UserProfile, 
   JournalEntry, 
   ReflectionIntent, 
   CognitivePatternAnalysis, 
-  WeeklyDigest 
+  WeeklyDigest,
+  MemoryCapsule
 } from './types';
 import { User } from 'firebase/auth';
 import { getWeekBounds, formatLocalDate } from './lib/dateUtils';
@@ -47,6 +53,12 @@ export default function App() {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [entriesLoading, setEntriesLoading] = useState<boolean>(false);
   const [isSavingEntry, setIsSavingEntry] = useState<boolean>(false);
+
+  // Memory Capsules state for accurate Life Archive & Life Gallery counts
+  const [capsules, setCapsules] = useState<MemoryCapsule[]>([]);
+
+  // Selected capsule detail ID for routing
+  const [selectedCapsuleId, setSelectedCapsuleId] = useState<string | null>(null);
 
   // Longitudinal Memory & Weekly Digest State
   const [cognitivePatterns, setCognitivePatterns] = useState<CognitivePatternAnalysis | null>(null);
@@ -64,7 +76,7 @@ export default function App() {
   // Multi-page navigation state
   const getInitialPath = (): string => {
     const path = window.location.pathname;
-    const validPaths = ['/dashboard', '/reflections', '/memory', '/weekly-insights', '/live', '/documents', '/calendar', '/settings'];
+    const validPaths = ['/dashboard', '/reflections', '/capsules', '/memories', '/memory', '/weekly-insights', '/live', '/documents', '/calendar', '/settings'];
     if (validPaths.includes(path)) {
       return path;
     }
@@ -77,15 +89,39 @@ export default function App() {
     return params.get('docId');
   });
 
+  // Memory Capsule direct share link parameters (via ?capsuleInvite=... or ?capsuleId=...)
+  const [sharedCapsuleInvite, setSharedCapsuleInvite] = useState<{ capsuleId?: string; inviteCode?: string } | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const invite = params.get('capsuleInvite') || params.get('invite');
+    const capId = params.get('capsuleId') || params.get('capsuleOwner');
+    if (invite || capId) {
+      return { 
+        inviteCode: invite || undefined, 
+        capsuleId: capId || undefined 
+      };
+    }
+    return null;
+  });
+
   // Listen to browser forward/backward navigation
   useEffect(() => {
     const handlePopState = () => {
       const path = window.location.pathname;
-      const validPaths = ['/dashboard', '/reflections', '/memory', '/weekly-insights', '/live', '/documents', '/calendar', '/settings'];
+      const validPaths = ['/dashboard', '/reflections', '/capsules', '/memories', '/memory', '/weekly-insights', '/live', '/documents', '/calendar', '/settings'];
       const params = new URLSearchParams(window.location.search);
       const docId = params.get('docId');
       if (docId) {
         setLivePreselectedDocId(docId);
+      }
+      const invite = params.get('capsuleInvite') || params.get('invite');
+      const capId = params.get('capsuleId') || params.get('capsuleOwner');
+      if (invite || capId) {
+        setSharedCapsuleInvite({ 
+          inviteCode: invite || undefined, 
+          capsuleId: capId || undefined 
+        });
+      } else {
+        setSharedCapsuleInvite(null);
       }
       if (validPaths.includes(path)) {
         setCurrentPath(path);
@@ -136,9 +172,11 @@ export default function App() {
         setCurrentUser(userProfile);
         loadUserEntries(user.uid);
         loadPatternsAndDigest(user.uid);
+        loadUserCapsules(user.uid);
       } else {
         setCurrentUser(null);
         setEntries([]);
+        setCapsules([]);
         setCognitivePatterns(null);
         setWeeklyDigest(null);
         setIsReflecting(false);
@@ -149,6 +187,16 @@ export default function App() {
 
     return () => unsubscribe();
   }, []);
+
+  // Fetch memory capsules to keep sidebar badge counts accurately synchronized
+  const loadUserCapsules = async (userId: string) => {
+    try {
+      const loaded = await loadMemoryCapsules(userId);
+      setCapsules(loaded);
+    } catch (err) {
+      console.error('Error fetching capsules for sidebar counts:', err);
+    }
+  };
 
   // Fetch entries from Firestore isolated by user UID
   const loadUserEntries = async (userId: string) => {
@@ -228,7 +276,11 @@ export default function App() {
         updatedAt: new Date().toISOString()
       });
 
-      await setDoc(entryRef, cleanData, { merge: true });
+      // Completely overwrite the document in Firestore to ensure deleted fields (e.g. location, deleted photos) are deleted
+      await setDoc(entryRef, cleanData);
+
+      // Keep activeEntry in sync with cleanData
+      setActiveEntry(prev => (prev && prev.id === entryToSave.id ? (cleanData as JournalEntry) : prev));
 
       // Update local state smoothly
       setEntries(prev => {
@@ -460,7 +512,24 @@ export default function App() {
     );
   }
 
-  // 2. Unauthenticated User -> Landing Page
+  // 2. Collaborative Memory Capsule Shared / Guest View
+  if (sharedCapsuleInvite) {
+    return (
+      <CapsuleGuestView
+        capsuleId={sharedCapsuleInvite.capsuleId}
+        inviteCode={sharedCapsuleInvite.inviteCode}
+        currentUser={currentUser}
+        onBackToApp={() => {
+          setSharedCapsuleInvite(null);
+          window.history.pushState({}, '', '/dashboard');
+          setCurrentPath('/dashboard');
+        }}
+        onSignIn={handleSignIn}
+      />
+    );
+  }
+
+  // 3. Unauthenticated User -> Landing Page
   if (!currentUser) {
     return (
       <LandingPage 
@@ -493,15 +562,29 @@ export default function App() {
     );
   }
 
+  // Life Archive & Life Gallery counts accurately calculated from Memory Capsules
+  const capsulesCount = capsules.length;
+  const galleryPhotosCount = capsules.reduce((acc, c) => acc + (c.photoCount || (c.coverPhoto ? 1 : 0)), 0);
+
   // 4. Authenticated Multi-Page Application Shell
   return (
     <AppLayout
       currentPath={currentPath}
-      onNavigate={handleNavigate}
+      onNavigate={(path) => {
+        if (path === '/capsules') {
+          setSelectedCapsuleId(null);
+        }
+        if (currentUser?.uid && (path === '/capsules' || path === '/memories' || path === '/dashboard')) {
+          loadUserCapsules(currentUser.uid);
+        }
+        handleNavigate(path);
+      }}
       user={currentUser}
       onSignOut={handleSignOut}
       onNewReflection={handleStartNewReflection}
       reflectionCount={entries.length}
+      capsulesCount={capsulesCount}
+      galleryPhotosCount={galleryPhotosCount}
     >
       {/* Route-Based Page Views */}
       {(() => {
@@ -514,6 +597,45 @@ export default function App() {
                 onSelectEntry={handleSelectEntry}
                 onDeleteEntry={handleDeleteEntry}
                 isLoading={entriesLoading}
+              />
+            );
+
+          case '/capsules':
+            if (selectedCapsuleId) {
+              return (
+                <CapsuleDetailPage
+                  capsuleId={selectedCapsuleId}
+                  userId={currentUser.uid}
+                  userName={currentUser.displayName || 'Me'}
+                  onBack={() => setSelectedCapsuleId(null)}
+                  onOpenCapsuleLink={(inviteCode) => {
+                    setSharedCapsuleInvite({ inviteCode });
+                  }}
+                />
+              );
+            }
+            return (
+              <MemoryCapsulesPage
+                userId={currentUser.uid}
+                userName={currentUser.displayName || 'Me'}
+                selectedCapsuleId={selectedCapsuleId}
+                onSelectCapsuleId={(id) => setSelectedCapsuleId(id)}
+                onOpenCapsuleLink={(inviteCode) => {
+                  setSharedCapsuleInvite({ inviteCode });
+                }}
+              />
+            );
+
+          case '/memories':
+            return (
+              <MemoriesPage
+                userId={currentUser.uid}
+                userName={currentUser.displayName || 'Me'}
+                onOpenCapsule={(capsuleId) => {
+                  setSelectedCapsuleId(capsuleId);
+                  handleNavigate('/capsules');
+                }}
+                onNavigate={handleNavigate}
               />
             );
 

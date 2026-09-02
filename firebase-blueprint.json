@@ -55,6 +55,14 @@
         "tags": {
           "type": "array",
           "description": "Keywords and themes"
+        },
+        "images": {
+          "type": "array",
+          "description": "User attached visual memories and photo keepsakes"
+        },
+        "location": {
+          "type": "object",
+          "description": "User tagged physical place or location"
         }
       },
       "required": ["id", "userId", "title", "intent", "createdAt", "updatedAt", "messages"]
@@ -267,12 +275,161 @@
         }
       },
       "required": ["id", "documentId", "userId", "text", "pageNumber", "chunkIndex", "createdAt"]
+    },
+    "MemoryCapsule": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique Memory Capsule identifier"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the capsule host"
+        },
+        "ownerName": {
+          "type": "string",
+          "description": "Host display name"
+        },
+        "title": {
+          "type": "string",
+          "description": "Event or milestone title"
+        },
+        "description": {
+          "type": "string",
+          "description": "Event description and context"
+        },
+        "coverPhoto": {
+          "type": "string",
+          "description": "Cover photo URL or compressed image data"
+        },
+        "eventDate": {
+          "type": "string",
+          "description": "Event date string"
+        },
+        "location": {
+          "type": "object",
+          "description": "Event geographical location"
+        },
+        "inviteCode": {
+          "type": "string",
+          "description": "Short unique invite code"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["open", "closed"]
+        },
+        "privacy": {
+          "type": "string",
+          "enum": ["friends", "private", "public"]
+        },
+        "hostMemory": {
+          "type": "string",
+          "description": "Host personal memory"
+        },
+        "participantIds": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of user UIDs who created or contributed to this archive"
+        },
+        "contributorUids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of contributor user UIDs"
+        },
+        "mosaic": {
+          "type": "object",
+          "description": "Synthesized AI story and collective perspectives"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "ownerId", "title", "eventDate", "inviteCode", "status", "privacy", "createdAt", "updatedAt"]
+    },
+    "CapsuleContributor": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique contributor submission identifier (contributor UID)"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Contributor Firebase Auth UID"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Contributor chosen display name"
+        },
+        "memory": {
+          "type": "string",
+          "description": "Contributor shared memory or reflection text"
+        },
+        "photos": {
+          "type": "array",
+          "description": "Attached photo URLs"
+        },
+        "photoUrl": {
+          "type": "string",
+          "description": "Optional attached keepsake photo URL"
+        },
+        "photoCaption": {
+          "type": "string",
+          "description": "Optional caption for the attached photo"
+        },
+        "emotion": {
+          "type": "string",
+          "description": "Associated emotion"
+        },
+        "favoriteMoment": {
+          "type": "string",
+          "description": "Highlight standout moment"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Submission ISO timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update ISO timestamp"
+        }
+      },
+      "required": ["id", "userId", "displayName", "memory", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
     "/users/{userId}/interactions/{interactionId}": {
       "schema": "JournalEntry",
-      "description": "User-isolated multi-turn cognitive reflections and Gemini dialogue interactions"
+      "description": "User-isolated private cognitive reflections and AI dialogues"
+    },
+    "/memoryCapsules/{capsuleId}": {
+      "schema": "MemoryCapsule",
+      "description": "First-class collaborative Memory Capsules for shared events and milestones"
+    },
+    "/memoryCapsules/{capsuleId}/contributors/{contributorId}": {
+      "schema": "CapsuleContributor",
+      "description": "Collaborative memory contributions from friends and invited participants for a Memory Capsule"
+    },
+    "/capsuleInvites/{inviteCode}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "capsuleId": { "type": "string" },
+          "inviteCode": { "type": "string" },
+          "ownerId": { "type": "string" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["capsuleId", "inviteCode"]
+      },
+      "description": "Public direct resolution index for Life Archive shareable invite codes"
     },
     "/users/{userId}/patterns/{patternId}": {
       "schema": "CognitivePatternAnalysis",

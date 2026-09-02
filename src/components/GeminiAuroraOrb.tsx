@@ -279,7 +279,7 @@ export const GeminiAuroraOrb: React.FC<GeminiAuroraOrbProps> = ({
 
         {/* Center Minimalist Glass Badge / Status Overlay */}
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-20 text-center px-4">
-          <div className="px-3.5 py-1.5 rounded-full bg-stone-950/40 backdrop-blur-md border border-white/20 shadow-lg flex items-center gap-2 transition-all duration-300 group-hover:bg-stone-950/60">
+          <div className="px-3.5 py-1.5 rounded-full bg-stone-950/50 backdrop-blur-md border border-white/20 shadow-lg flex items-center gap-2 transition-all duration-300 group-hover:bg-stone-950/70">
             {state === 'idle' ? (
               <>
                 <div className="w-5 h-5 rounded-full bg-amber-400/30 flex items-center justify-center text-amber-200">
@@ -289,8 +289,11 @@ export const GeminiAuroraOrb: React.FC<GeminiAuroraOrbProps> = ({
               </>
             ) : state === 'connecting' ? (
               <>
-                <RefreshCw className="w-4 h-4 text-amber-300 animate-spin" />
-                <span className="text-xs font-medium text-amber-100">Connecting...</span>
+                <RefreshCw className="w-4 h-4 text-amber-300 animate-spin shrink-0" />
+                <div className="flex flex-col items-start text-left leading-none">
+                  <span className="text-xs font-semibold text-amber-200">Valeria is getting ready...</span>
+                  <span className="text-[9px] text-stone-300/80 font-mono mt-0.5">Please wait a moment</span>
+                </div>
               </>
             ) : state === 'speaking' ? (
               <>
@@ -310,7 +313,7 @@ export const GeminiAuroraOrb: React.FC<GeminiAuroraOrbProps> = ({
               <>
                 <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                 <span className="text-xs font-semibold text-white">Listening</span>
-                <span className="text-[9px] text-stone-300/80 font-mono">(Speak now)</span>
+                <span className="text-[9px] text-emerald-300 font-mono font-medium">(Speak now)</span>
               </>
             )}
           </div>

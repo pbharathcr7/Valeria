@@ -27,12 +27,31 @@ export const CalendarPlacesPage: React.FC<CalendarPlacesPageProps> = ({
   const mapItems: { action: MapsAction; entry: JournalEntry }[] = [];
 
   entries.forEach(entry => {
+    // 1. User-tagged location from Reflection photo/place attachments
+    if (entry.location) {
+      mapItems.push({
+        action: {
+          id: `tagged_loc_${entry.id}`,
+          type: 'maps',
+          placeName: entry.location.placeName,
+          query: `${entry.location.placeName} ${entry.location.address || ''}`.trim()
+        },
+        entry
+      });
+    }
+
+    // 2. Actions extracted from conversation messages
     (entry.messages || []).forEach(msg => {
       (msg.actions || []).forEach(act => {
         if (act.type === 'calendar') {
           calendarItems.push({ action: act as CalendarAction, entry });
         } else if (act.type === 'maps') {
-          mapItems.push({ action: act as MapsAction, entry });
+          // Avoid duplicate if same location name
+          const mapsAct = act as MapsAction;
+          const alreadyAdded = mapItems.some(m => m.entry.id === entry.id && m.action.placeName?.toLowerCase() === mapsAct.placeName?.toLowerCase());
+          if (!alreadyAdded) {
+            mapItems.push({ action: mapsAct, entry });
+          }
         }
       });
     });

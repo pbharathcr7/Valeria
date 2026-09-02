@@ -14,6 +14,8 @@ interface AppLayoutProps {
   onSignOut: () => Promise<void>;
   onNewReflection: (intent?: ReflectionIntent) => void;
   reflectionCount?: number;
+  capsulesCount?: number;
+  galleryPhotosCount?: number;
 }
 
 export const AppLayout: React.FC<AppLayoutProps> = ({
@@ -23,7 +25,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   user,
   onSignOut,
   onNewReflection,
-  reflectionCount = 0
+  reflectionCount = 0,
+  capsulesCount = 0,
+  galleryPhotosCount = 0
 }) => {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
@@ -37,6 +41,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         onSignOut={onSignOut}
         onNewReflection={onNewReflection}
         reflectionCount={reflectionCount}
+        capsulesCount={capsulesCount}
+        galleryPhotosCount={galleryPhotosCount}
         isOpenMobile={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
       />

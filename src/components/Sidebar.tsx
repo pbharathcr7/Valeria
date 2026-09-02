@@ -12,7 +12,9 @@ import {
   X, 
   Sparkles, 
   FileText,
-  Radio
+  Radio,
+  Camera,
+  Users
 } from 'lucide-react';
 import { UserProfile, ReflectionIntent } from '../types';
 
@@ -30,6 +32,8 @@ interface SidebarProps {
   onSignOut: () => void;
   onNewReflection: (intent?: ReflectionIntent) => void;
   reflectionCount?: number;
+  capsulesCount?: number;
+  galleryPhotosCount?: number;
   isOpenMobile?: boolean;
   onCloseMobile?: () => void;
 }
@@ -41,6 +45,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSignOut,
   onNewReflection,
   reflectionCount = 0,
+  capsulesCount = 0,
+  galleryPhotosCount = 0,
   isOpenMobile = false,
   onCloseMobile
 }) => {
@@ -56,6 +62,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Reflections',
       icon: BookOpen,
       badge: reflectionCount > 0 ? String(reflectionCount) : null
+    },
+    {
+      path: '/capsules',
+      label: 'Life Archive',
+      icon: Users,
+      badge: capsulesCount > 0 ? String(capsulesCount) : null
+    },
+    {
+      path: '/memories',
+      label: 'Life Gallery',
+      icon: Camera,
+      badge: galleryPhotosCount > 0 ? String(galleryPhotosCount) : null
     },
     {
       path: '/memory',
