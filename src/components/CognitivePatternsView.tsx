@@ -269,7 +269,7 @@ export const CognitivePatternsView: React.FC<CognitivePatternsViewProps> = ({
         >
           <div className="flex items-center gap-2">
             <BookOpen className="w-4 h-4 text-stone-700" />
-            <span className="font-medium">Gemini&apos;s Full Cognitive Analysis</span>
+            <span className="font-medium">Deep Cognitive Narrative</span>
           </div>
           <div className="flex items-center gap-1.5 text-[11px] font-mono text-stone-500">
             <span>{isNarrativeExpanded ? 'Hide Narrative' : 'Expand Narrative'}</span>

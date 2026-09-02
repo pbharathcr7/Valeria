@@ -29,10 +29,7 @@ interface DocumentChatCanvasProps {
 
 const STARTER_QUESTIONS = [
   'Summarize this document.',
-  'Explain the key concepts.',
-  'List important technologies.',
-  'Generate interview questions from this document.',
-  'Give me a concise executive summary.'
+  'Explain the key concepts.'
 ];
 
 export const DocumentChatCanvas: React.FC<DocumentChatCanvasProps> = ({

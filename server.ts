@@ -39,9 +39,8 @@ function getGeminiClient(): GoogleGenAI {
 
 // Resilient Model Fallback Ladder with gemini-3.6-flash as primary
 const MODEL_FALLBACK_CHAIN = [
+  'gemini-3.5-flash-lite',
   'gemini-3.6-flash',
-  'gemini-3.1-flash-lite',
-  'gemini-flash-latest',
   'gemini-3.7-flash'
 ];
 
@@ -774,9 +773,8 @@ Synthesize a high-impact, grounded, and encouraging weekly digest. Return strict
 async function generateEmbeddingWithGemini(text: string): Promise<number[]> {
   const ai = getGeminiClient();
   const EMBEDDING_MODELS = [
-    'gemini-embedding-2-preview',
-    'text-embedding-004',
-    'embedding-001'
+    'gemini-embedding-2',
+    'gemini-embedding-001'
   ];
 
   for (const model of EMBEDDING_MODELS) {

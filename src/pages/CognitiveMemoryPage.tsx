@@ -50,7 +50,7 @@ export const CognitiveMemoryPage: React.FC<CognitiveMemoryPageProps> = ({
             Cognitive Memory &amp; Growth
           </h2>
           <p className="text-xs sm:text-sm text-stone-500 max-w-xl">
-            Longitudinal pattern recognition powered by Gemini. Synthesize recurring themes, cognitive hurdles, and resilience trends across time.
+            Discover recurring thought patterns, emotional shifts, and long-term personal growth synthesized across your reflections.
           </p>
         </div>
 
@@ -95,7 +95,7 @@ export const CognitiveMemoryPage: React.FC<CognitiveMemoryPageProps> = ({
               </div>
               <div>
                 <h3 className="font-serif font-bold text-lg text-stone-900">
-                  Synthesized Cognitive Architecture
+                  Your Cognitive Growth Story
                 </h3>
                 <p className="text-xs text-stone-500 font-mono">
                   Synthesized from {patterns.entryCount || entries.length} reflection sessions • Stored in Firestore

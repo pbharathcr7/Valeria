@@ -65,7 +65,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       path: '/capsules',
-      label: 'Life Archive',
+      label: 'Life Archives',
       icon: Users,
       badge: capsulesCount > 0 ? String(capsulesCount) : null
     },
