@@ -538,6 +538,79 @@ You MUST respond strictly with valid JSON conforming to this TypeScript schema:
   }
 });
 
+// Endpoint: Send Digest Email via Gmail API (Server-Side Proxy with Google OAuth Bearer Token)
+app.post('/api/reflect/send-digest-email', async (req: express.Request, res: express.Response) => {
+  try {
+    const body = (req.body && typeof req.body === 'object') ? req.body : {};
+    const { digest, recipientEmail, userDisplayName } = body;
+
+    if (!digest || !recipientEmail) {
+      return res.status(400).json({ error: 'Missing digest or recipientEmail payload.' });
+    }
+
+    // Check if client supplied an Authorization header with Bearer token
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+    if (!token) {
+      return res.status(401).json({
+        error: 'Authorization token required. Please sign in with Google to authorize sending emails.'
+      });
+    }
+
+    // Construct RFC 2822 email payload
+    const subject = `Your Valeria Weekly Digest (${digest.weekStart || ''} - ${digest.weekEnd || ''})`;
+    const title = digest.content?.title || 'Weekly Cognitive Synthesis';
+    const narrative = digest.content?.narrative || 'Weekly reflection insights and growth analysis.';
+    
+    const emailLines = [
+      `To: ${recipientEmail}`,
+      `Subject: =?utf-8?B?${Buffer.from(subject).toString('base64')}?=`,
+      'MIME-Version: 1.0',
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      `<!DOCTYPE html>
+<html>
+<body style="font-family: sans-serif; background-color: #fafaf9; color: #1c1917; padding: 24px;">
+  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e7e5e4; padding: 28px;">
+    <h2 style="color: #78350f; margin-top: 0;">${title}</h2>
+    <p style="font-size: 15px; line-height: 1.6; color: #44403c;">${narrative}</p>
+    <hr style="border: none; border-top: 1px solid #e7e5e4; margin: 20px 0;" />
+    <p style="font-size: 12px; color: #78716c;">Generated with care by Valeria Cognitive Journaling Companion.</p>
+  </div>
+</body>
+</html>`
+    ];
+
+    const rawEmail = Buffer.from(emailLines.join('\r\n'))
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    const gmailResp = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ raw: rawEmail })
+    });
+
+    if (!gmailResp.ok) {
+      const errData = await gmailResp.json().catch(() => ({}));
+      const errMsg = (errData as any)?.error?.message || `Gmail API Error (${gmailResp.status})`;
+      return res.status(gmailResp.status).json({ error: errMsg });
+    }
+
+    const gmailData = await gmailResp.json();
+    return res.json({ success: true, messageId: (gmailData as any).id });
+  } catch (err: any) {
+    console.error('Error in /api/reflect/send-digest-email:', err);
+    return res.status(500).json({ error: err?.message || 'Internal server error sending digest email.' });
+  }
+});
+
 // Helper to parse and ensure structured cognitive pattern analysis
 function parseStructuredPatterns(rawText: string, entryCount: number) {
   let cleaned = rawText.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();

@@ -18,6 +18,7 @@ import {
   saveWeeklyDigest,
   loadMemoryCapsules
 } from './lib/firebase';
+import { sendWeeklyDigestEmail } from './lib/gmailService';
 import { LandingPage } from './components/LandingPage';
 import { AppLayout } from './components/AppLayout';
 import { DashboardPage } from './pages/DashboardPage';
@@ -438,22 +439,12 @@ export default function App() {
     const targetEmail = recipientEmail || currentUser?.email;
     if (!targetEmail) throw new Error('No valid recipient email address.');
 
-    const resp = await fetch('/api/reflect/send-digest-email', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        digest: weeklyDigest,
-        recipientEmail: targetEmail,
-        userDisplayName: currentUser?.displayName
-      })
-    });
-
-    if (!resp.ok) {
-      const errJson = await resp.json().catch(() => ({}));
-      throw new Error(errJson.error || 'Failed to send digest email via Gmail API.');
-    }
-
-    const data = await resp.json();
+    // 1. Direct dispatch via authenticated Google OAuth Token & Gmail REST API
+    const result = await sendWeeklyDigestEmail(
+      weeklyDigest,
+      targetEmail,
+      currentUser?.displayName || undefined
+    );
 
     const updatedDigest: WeeklyDigest = {
       ...weeklyDigest,
@@ -467,7 +458,7 @@ export default function App() {
       await saveWeeklyDigest(currentUser.uid, weeklyDigest.id, updatedDigest);
     }
 
-    return data;
+    return { success: true, messageId: result.messageId };
   };
 
   // Reflection Canvas Handlers
