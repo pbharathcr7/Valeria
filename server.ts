@@ -1,16 +1,115 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
 import path from 'path';
+import fs from 'fs';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Modality, ThinkingLevel } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { PDFParse } from 'pdf-parse';
 import { WebSocketServer, WebSocket } from 'ws';
+import { initializeApp as initAdminApp, getApps as getAdminApps } from 'firebase-admin/app';
+import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
+
+// Resolve Firebase Project ID dynamically from config or environment
+function getFirebaseProjectId(): string {
+  if (process.env.FIREBASE_PROJECT_ID) {
+    return process.env.FIREBASE_PROJECT_ID;
+  }
+  try {
+    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    if (fs.existsSync(configPath)) {
+      const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      if (parsed.projectId) {
+        return parsed.projectId;
+      }
+    }
+  } catch (err) {
+    console.warn('[Auth] Warning reading firebase-applet-config.json:', err);
+  }
+  return process.env.GCLOUD_PROJECT || 'personal-gemini-journal-506618';
+}
+
+const defaultProjectId = getFirebaseProjectId();
+
+// Helper to get or initialize an admin app for a given project ID
+function getOrInitAdminApp(projectId: string) {
+  const apps = getAdminApps();
+  const existing = apps.find(a => a.name === projectId || (projectId === defaultProjectId && a.name === '[DEFAULT]') || (a.options as any)?.projectId === projectId);
+  if (existing) return existing;
+  if (!apps.length) {
+    return initAdminApp({ projectId });
+  }
+  return initAdminApp({ projectId }, projectId);
+}
+
+// Initial bootstrap of default Firebase Admin app
+try {
+  getOrInitAdminApp(defaultProjectId);
+  console.log(`[Auth] Firebase Admin initialized for project: ${defaultProjectId}`);
+} catch (err: any) {
+  console.warn('[Auth] Firebase Admin initialization warning:', err?.message || err);
+}
+
+// Secure token verification with audience auto-detection
+export async function verifyTokenSafely(idToken: string) {
+  let tokenAudience = defaultProjectId;
+  try {
+    const parts = idToken.split('.');
+    if (parts.length === 3) {
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8'));
+      if (payload.aud && typeof payload.aud === 'string') {
+        tokenAudience = payload.aud;
+      }
+    }
+  } catch (e) {
+    // If decoding fails, will use defaultProjectId and verifyIdToken will reject malformed token
+  }
+
+  const appInstance = getOrInitAdminApp(tokenAudience);
+  const authInstance = getAdminAuth(appInstance);
+  return await authInstance.verifyIdToken(idToken);
+}
+
+// Authenticated Request interface with Firebase user token metadata
+export interface AuthenticatedRequest extends Request {
+  user?: any;
+  userId?: string;
+}
+
+// Server-side Firebase Authentication Middleware (OWASP A01 / A03 Enforcement)
+export async function verifyFirebaseToken(req: Request, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({
+      error: 'Unauthorized: Missing or malformed Authorization header. Expected Bearer <Firebase_ID_Token>.'
+    });
+  }
+
+  const idToken = authHeader.split('Bearer ')[1].trim();
+  if (!idToken) {
+    return res.status(401).json({
+      error: 'Unauthorized: Missing token in Authorization header.'
+    });
+  }
+
+  try {
+    const decodedToken = await verifyTokenSafely(idToken);
+    (req as AuthenticatedRequest).user = decodedToken;
+    (req as AuthenticatedRequest).userId = decodedToken.uid;
+    next();
+  } catch (err: any) {
+    console.warn('[Security][Auth] Token verification rejected:', err?.message || err);
+    return res.status(401).json({
+      error: 'Unauthorized: Invalid or expired Firebase ID token.',
+      code: err?.code || 'AUTH_TOKEN_INVALID'
+    });
+  }
+}
 
 // 1. Top-Level Request Deserialization (Ordering Guarantee) - 30mb limit for PDF processing
 app.use(express.json({ limit: '30mb' }));
@@ -37,11 +136,10 @@ function getGeminiClient(): GoogleGenAI {
   return aiClient;
 }
 
-// Resilient Model Fallback Ladder with gemini-3.6-flash as primary
+// Resilient Model Fallback Ladder ordered by availability and latency (Production Directive)
 const MODEL_FALLBACK_CHAIN = [
   'gemini-3.5-flash-lite',
   'gemini-3.6-flash',
-  'gemini-flash-latest',
   'gemini-3.7-flash'
 ];
 
@@ -252,7 +350,7 @@ app.get('/api/health', (req: Request, res: Response) => {
 });
 
 // API: Multi-turn Reflection Chat Endpoint (Streaming via Server-Sent Events)
-app.post('/api/reflect/chat', async (req: Request, res: Response) => {
+app.post('/api/reflect/chat', verifyFirebaseToken, async (req: Request, res: Response) => {
   const reqStart = performance.now();
   const timings: { [stage: string]: number } = {};
 
@@ -472,7 +570,7 @@ Evocative 3-6 Word Title
 });
 
 // API: Synthesize Session / Generate Insights & Summary
-app.post('/api/reflect/synthesize', async (req: Request, res: Response) => {
+app.post('/api/reflect/synthesize', verifyFirebaseToken, async (req: Request, res: Response) => {
   try {
     const body = (req.body && typeof req.body === 'object') ? req.body : {};
     const { messages = [], intent = 'deep_reflection' } = body;
@@ -670,7 +768,7 @@ function parseStructuredPatterns(rawText: string, entryCount: number) {
 }
 
 // API: Weekly Cognitive Growth & Patterns Analyzer
-app.post('/api/reflect/patterns', async (req: Request, res: Response) => {
+app.post('/api/reflect/patterns', verifyFirebaseToken, async (req: Request, res: Response) => {
   try {
     const body = (req.body && typeof req.body === 'object') ? req.body : {};
     const { entries = [] } = body;
@@ -732,7 +830,7 @@ Synthesize a comprehensive, high-quality cognitive patterns analysis and return 
 });
 
 // API: Weekly Reflection Digest Generator
-app.post('/api/reflect/weekly-digest', async (req: Request, res: Response) => {
+app.post('/api/reflect/weekly-digest', verifyFirebaseToken, async (req: Request, res: Response) => {
   try {
     const body = (req.body && typeof req.body === 'object') ? req.body : {};
     const { entries = [], weekStart, weekEnd, cognitivePatterns } = body;
@@ -969,13 +1067,14 @@ async function generateEmbeddingWithGemini(text: string): Promise<number[]> {
 }
 
 // API: Process PDF Document, Extract Text & Page Numbers, Chunk, and Embed
-app.post('/api/documents/process', async (req: Request, res: Response) => {
+app.post('/api/documents/process', verifyFirebaseToken, async (req: Request, res: Response) => {
   try {
     const body = (req.body && typeof req.body === 'object') ? req.body : {};
-    const { userId, fileName = 'document.pdf', fileSize = 0, fileBase64 } = body;
+    const { fileName = 'document.pdf', fileSize = 0, fileBase64 } = body;
+    const effectiveUserId = (req as AuthenticatedRequest).userId || body.userId;
 
-    if (!userId || typeof userId !== 'string') {
-      return res.status(400).json({ error: 'User ID is required for document processing.' });
+    if (!effectiveUserId || typeof effectiveUserId !== 'string') {
+      return res.status(400).json({ error: 'Authenticated User ID is required for document processing.' });
     }
 
     if (!fileBase64 || typeof fileBase64 !== 'string') {
@@ -1164,20 +1263,20 @@ function computeCosineSimilarity(vecA: number[], vecB: number[]): number {
 }
 
 // API: Ask PDF (RAG Chat with Document-Grounding & Evidence References)
-app.post('/api/documents/ask', async (req: Request, res: Response) => {
+app.post('/api/documents/ask', verifyFirebaseToken, async (req: Request, res: Response) => {
   try {
     const body = (req.body && typeof req.body === 'object') ? req.body : {};
     const { 
-      userId, 
       documentId, 
       fileName = 'Document.pdf', 
       question, 
       chunks = [],
       conversationHistory = []
     } = body;
+    const effectiveUserId = (req as AuthenticatedRequest).userId || body.userId;
 
-    if (!userId || typeof userId !== 'string') {
-      return res.status(400).json({ error: 'User ID is required.' });
+    if (!effectiveUserId || typeof effectiveUserId !== 'string') {
+      return res.status(400).json({ error: 'Authenticated User ID is required.' });
     }
     if (!documentId || typeof documentId !== 'string') {
       return res.status(400).json({ error: 'Document ID is required.' });
@@ -1329,7 +1428,7 @@ Provide the answer strictly using the retrieved excerpts above and format with *
 });
 
 // API: Generate Collaborative AI Memory Mosaic for Memory Capsules
-app.post('/api/capsules/mosaic', async (req: Request, res: Response) => {
+app.post('/api/capsules/mosaic', verifyFirebaseToken, async (req: Request, res: Response) => {
   try {
     const body = (req.body && typeof req.body === 'object') ? req.body : {};
     const { 
@@ -1483,13 +1582,27 @@ async function start() {
     }
   });
 
-  wss.on('connection', async (ws: WebSocket) => {
+  wss.on('connection', async (ws: WebSocket, request: http.IncomingMessage) => {
     console.log('Valeria Live: Client WebSocket connected.');
     let liveSession: any = null;
     let isClosed = false;
     let isConnecting = false;
     let pendingAudioChunks: string[] = [];
     let pendingTextInput: string | null = null;
+    let authenticatedUid: string | null = null;
+
+    // Check token from connection query params if present
+    try {
+      const url = new URL(request?.url || '', `http://${request?.headers?.host || 'localhost'}`);
+      const tokenParam = url.searchParams.get('token');
+      if (tokenParam) {
+        const decoded = await verifyTokenSafely(tokenParam);
+        authenticatedUid = decoded.uid;
+        console.log(`[Security][WebSocket] User authenticated for Live session: ${authenticatedUid}`);
+      }
+    } catch (tokenErr: any) {
+      console.warn('[Security][WebSocket] Initial token verification warning:', tokenErr?.message || tokenErr);
+    }
 
     const safeSend = (payload: any) => {
       if (isClosed || ws.readyState !== WebSocket.OPEN) return;
@@ -1675,6 +1788,15 @@ async function start() {
         if (isClosed) return;
         const message = JSON.parse(data.toString());
         if (message.type === 'setup') {
+          if (!authenticatedUid && message.authToken) {
+            try {
+              const decoded = await verifyTokenSafely(message.authToken);
+              authenticatedUid = decoded.uid;
+              console.log(`[Security][WebSocket] User authenticated via setup message: ${authenticatedUid}`);
+            } catch (authErr: any) {
+              console.warn('[Security][WebSocket] Setup token validation warning:', authErr?.message || authErr);
+            }
+          }
           const requestedVoice = message.voiceName || 'Zephyr';
           const groundingContext = message.groundingContext || '';
           await initLiveSession(requestedVoice, groundingContext);

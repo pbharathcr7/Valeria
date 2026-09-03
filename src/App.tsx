@@ -11,12 +11,14 @@ import {
   deleteDoc, 
   query, 
   orderBy,
+  limit,
   sanitizePayload,
   loadCognitivePatterns,
   saveCognitivePatterns,
   loadWeeklyDigest,
   saveWeeklyDigest,
-  loadMemoryCapsules
+  loadMemoryCapsules,
+  authFetch
 } from './lib/firebase';
 import { sendWeeklyDigestEmail } from './lib/gmailService';
 import { LandingPage } from './components/LandingPage';
@@ -205,8 +207,8 @@ export default function App() {
     try {
       const { db } = await initFirebase();
       const entriesRef = collection(db, 'users', userId, 'interactions');
-      const q = query(entriesRef, orderBy('createdAt', 'desc'));
-      const snapshot = await getDocs(q);
+      const q = query(entriesRef, orderBy('createdAt', 'desc'), limit(10));
+      const snapshot = await getDocs(q); 
 
       const loaded: JournalEntry[] = [];
       snapshot.forEach(docSnap => {
@@ -329,7 +331,7 @@ export default function App() {
     setPatternError(null);
 
     try {
-      const resp = await fetch('/api/reflect/patterns', {
+      const resp = await authFetch('/api/reflect/patterns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entries })
@@ -382,7 +384,7 @@ export default function App() {
     setDigestError(null);
 
     try {
-      const resp = await fetch('/api/reflect/weekly-digest', {
+      const resp = await authFetch('/api/reflect/weekly-digest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

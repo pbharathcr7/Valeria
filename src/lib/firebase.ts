@@ -22,6 +22,7 @@ import {
   query,
   where,
   orderBy,
+  limit,
   deleteDoc,
   serverTimestamp,
   Timestamp
@@ -748,6 +749,37 @@ export async function deleteCapsuleContribution(capsuleIdOrOwnerId: string, cont
 // Legacy alias
 export const loadCapsuleEntry = loadMemoryCapsuleById;
 
+/**
+ * Retrieves the current authenticated user's Firebase ID token.
+ * Forces token refresh if expired.
+ */
+export async function getAuthToken(forceRefresh = false): Promise<string | null> {
+  const { auth } = await initFirebase();
+  const user = auth.currentUser;
+  if (!user) return null;
+  try {
+    return await user.getIdToken(forceRefresh);
+  } catch (err) {
+    console.warn('Failed to retrieve Firebase ID token:', err);
+    return null;
+  }
+}
+
+/**
+ * Authenticated fetch helper that injects the Firebase Authorization Bearer token.
+ */
+export async function authFetch(url: string, init?: RequestInit): Promise<Response> {
+  const token = await getAuthToken();
+  const headers = new Headers(init?.headers);
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+  return fetch(url, {
+    ...init,
+    headers
+  });
+}
+
 export { 
   collection, 
   doc, 
@@ -756,6 +788,7 @@ export {
   getDocs, 
   query, 
   orderBy, 
+  limit,
   deleteDoc, 
   serverTimestamp 
 };

@@ -18,7 +18,8 @@ import { DocumentItem, DocumentChatMessage, UserProfile, DocumentChunk } from '.
 import { 
   loadDocumentChunks, 
   loadDocumentConversations, 
-  saveDocumentChatMessage 
+  saveDocumentChatMessage,
+  authFetch
 } from '../lib/firebase';
 
 interface DocumentChatCanvasProps {
@@ -149,7 +150,7 @@ export const DocumentChatCanvas: React.FC<DocumentChatCanvasProps> = ({
     }
 
     try {
-      const response = await fetch('/api/documents/ask', {
+      const response = await authFetch('/api/documents/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

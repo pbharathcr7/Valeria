@@ -26,7 +26,8 @@ import {
   deleteMemoryCapsule,
   loadCapsuleContributors, 
   saveCapsuleContribution, 
-  deleteCapsuleContribution 
+  deleteCapsuleContribution,
+  authFetch
 } from '../lib/firebase';
 import { MemoryMosaicModal } from '../components/MemoryMosaicModal';
 import { compressImageFile } from '../lib/imageUtils';
@@ -228,7 +229,7 @@ export const CapsuleDetailPage: React.FC<CapsuleDetailPageProps> = ({
       setIsSynthesizing(true);
       setError(null);
 
-      const response = await fetch('/api/capsules/mosaic', {
+      const response = await authFetch('/api/capsules/mosaic', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

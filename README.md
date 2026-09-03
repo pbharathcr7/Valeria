@@ -13,29 +13,31 @@ Valeria is an AI-powered cognitive journal that transforms journaling into an on
 
 | Threat Zone | Identified Vector | Implemented Countermeasure |
 | :--- | :--- | :--- |
-| **1. Input Surfaces** | Malicious injection or oversized payload in prompts | Strict schema validation, body parser limits (10mb), and defensive request null-safe checks. |
-| **2. Planning & Reasoning** | Prompt injection attempting to alter system role | System instructions strictly separate role guidance from user conversation history; fallback ladder handles API anomalies. |
-| **3. Tool & AI Execution** | Gemini API key exposure or dynamic execution | Gemini API calls are strictly handled server-side (`server.ts`). Client never sees `GEMINI_API_KEY`. |
-| **4. Memory & State** | Cross-user reflection leaks or unauthorized reads | Firestore Security Rules strictly enforce `request.auth.uid == userId` for `/users/{userId}/interactions/{interactionId}`. |
-| **5. Inter-System Communication** | Token leakage or insecure transport | Standard Google OAuth popup flow via Firebase Authentication; no password credentials stored in custom app code. |
+| **1. Input Surfaces** | Malicious prompt injection, oversized PDF payloads, or corrupted JSON bodies | Strict schema validation, body parser limits (30mb for PDFs, guarded null-safe defaults), and explicit parameterization. |
+| **2. Planning & Reasoning** | Prompt injection attempting to hijack Socratic persona or leak system rules | System instructions strictly separate meta-guidelines from user memory; Resilient fallback ladder (`gemini-3.6-flash` -> `gemini-3.1-flash-lite` -> `gemini-flash-latest` -> `gemini-3.7-flash`) safely recovers from API errors without raw error leaks. |
+| **3. Tool & AI Execution** | Gemini API key exposure, unauthorized AI invocation, or SSRF | Gemini API key (`GEMINI_API_KEY`) is strictly server-side (`server.ts`). All AI endpoints (`/api/reflect/*`, `/api/documents/*`, `/api/capsules/*`, `/ws/live`) require valid Firebase ID tokens verified via Firebase Admin SDK (`verifyFirebaseToken`). |
+| **4. Memory & State** | Cross-user reflection leaks, unauthorized document reads, or session tampering | Firestore Security Rules enforce owner-bound path isolation (`request.auth.uid == userId`) for personal documents, chunks, patterns, and digests. Capsules restrict list operations to owners/collaborators. |
+| **5. Inter-System Communication** | Token theft, OAuth credential exposure, or insecure transit | Standard Google OAuth popup flow via Firebase Authentication; Google Workspace APIs (Calendar, Gmail) use short-lived client-side bearer tokens with least-privilege scopes. No passwords or service account private keys are ever stored in custom code. |
 
 ---
 
 ## 🛠️ Tech Stack & Architecture
 
-- **Frontend**: React 19, TypeScript, Tailwind CSS, Lucide Icons, Motion.
-- **Backend API**: Node.js & Express (`server.ts`) proxying Gemini 3.6 Flash with fallback ladders.
-- **AI Processing**: Google GenAI SDK (`@google/genai`) using Gemini 3.6 Flash (with automated failover to Gemini 3.1 Flash Lite and latest aliases).
+- **Frontend**: React 19, TypeScript, Tailwind CSS v4, Lucide Icons, Motion.
+- **Backend API & Middleware**: Node.js & Express (`server.ts`) with Firebase Admin authentication middleware (`verifyFirebaseToken`) proxying Gemini 3.6 Flash.
+- **AI Processing**: Google GenAI SDK (`@google/genai`) using Gemini 3.6 Flash (with automated fallback to Gemini 3.1 Flash Lite and latest aliases) and `gemini-embedding-2` for vector similarity search.
+- **Real-Time Voice**: WebSockets (`ws`) interfacing with `gemini-3.1-flash-live-preview` for bidirectional low-latency audio dialogue with token authentication.
 - **Authentication**: Firebase Authentication with Google Sign-In (federated passwordless identity).
-- **Database**: Google Cloud Firestore with owner-bound isolation rules.
+- **Database**: Google Cloud Firestore with owner-bound isolation security rules.
+- **Document Intelligence**: PDF parsing (`pdf-parse`), semantic chunking, and in-memory cosine similarity retrieval.
 - **Secrets Management**: Environment variable injection & Google Cloud Secret Manager.
 
 ---
 
 ## 🚀 Step-by-Step Deployment to Google Cloud Run
 
-### 1. Prerequisites & GCP APIs
-Enable required Google Cloud APIs:
+### 1. Environment & Prerequisites
+Install the Google Cloud SDK and enable the required GCP APIs:
 ```bash
 gcloud services enable \
   run.googleapis.com \
@@ -43,38 +45,34 @@ gcloud services enable \
   firestore.googleapis.com
 ```
 
-### 2. Secret Manager Configuration
-Store the Gemini API Key securely in Secret Manager:
+### 2. Secret Management Setup
+Store the Gemini API Key securely in Secret Manager and grant access to the Cloud Run runtime service account:
 ```bash
-# Create and populate secret
+# Create and populate the secret
 gcloud secrets create GEMINI_API_KEY --replication-policy="automatic"
-echo -n "YOUR_GEMINI_API_KEY" | gcloud secrets versions add GEMINI_API_KEY --data-file=-
+echo -n "YOUR_API_KEY" | gcloud secrets versions add GEMINI_API_KEY --data-file=-
 
-# Grant default Cloud Run compute service account access
-PROJECT_NUMBER=$(gcloud projects describe $(gcloud config get-value project) --format="value(projectNumber)")
+# Grant the default Cloud Run service account access to read the secret
 gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
-  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --member="serviceAccount:YOUR_PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
 ```
 
-### 3. Deploy Firestore Security Rules
-Ensure `firestore.rules` enforces user data isolation:
+### 3. Database Security Configuration (Firestore Security Rules)
+Deploy the exact owner-bound security rules to isolate user data:
 ```javascript
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{userId} {
+    match /users/{userId}/interactions/{interactionId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
-      match /interactions/{interactionId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-      }
     }
   }
 }
 ```
 
-### 4. Deploy Application to Cloud Run
-Build and deploy the application container:
+### 4. Cloud Run Deployment Flow
+Build and deploy the application container to Google Cloud Run:
 ```bash
 gcloud run deploy Valeria \
   --source . \
@@ -85,12 +83,12 @@ gcloud run deploy Valeria \
   --port 3000
 ```
 
-### 5. Challenge Verification Label
-Attach the mandatory developer challenge campaign label:
+### 5. Required Campaign Labeling (Verification Binding)
+Apply the mandatory resource label to register the service for automated challenge verification:
 ```bash
-gcloud run services update Valeria \
+gcloud run services update <SERVICE_NAME> \
   --update-labels=dev-tutorial=cloud-run-ai-challenge \
-  --region=us-central1
+  --region=<REGION>
 ```
 
 ---
@@ -205,5 +203,44 @@ To ensure 100% interactive stability, walk through each of the following test sc
    - Verify it displays user identity information (UID, email), active Gemini AI model infrastructure ladder, and connected services status with Sign Out button.
 8. Use browser Back and Forward buttons:
    - Verify the application route changes seamlessly without full page reloads, preserving client state.
+
+### Test Case 10: RAG Document Intelligence & PDF Grounding
+1. In the sidebar, navigate to **"Document Intelligence"** (`/documents`).
+2. Drag and drop or browse to upload a PDF document (e.g., meeting notes, research papers, or personal guidelines).
+3. Verify the upload progress and server-side processing:
+   - PDF is sent to `/api/documents/process` with Firebase ID token authentication.
+   - Server extracts text with page numbers using `pdf-parse` and computes vector embeddings via `gemini-embedding-2`.
+   - Document metadata and semantic chunks are saved to Cloud Firestore under `/users/{userId}/documents/{documentId}/chunks`.
+4. Click the processed document to open the **Ask PDF** grounding chat workspace.
+5. Submit an inquiry grounded in the document (e.g., *"What were the key decisions in section 2?"*).
+6. Verify that Gemini retrieves the top relevant chunks using cosine similarity and responds with evidence citations referencing specific page numbers.
+7. Verify that document chats and citations persist across reloads.
+
+### Test Case 11: Collaborative Memory Capsules & AI Memory Mosaic
+1. In the sidebar, navigate to **"Memory Capsules"** (`/capsules`).
+2. Click **"Create Memory Capsule"** to archive a shared life milestone (e.g., team launch, family reunion, wedding).
+3. Fill in the title, date, location (with Google Maps autocomplete), and initial host memory, then save.
+4. Copy the unique **Invite Link** or share code generated for the capsule.
+5. Open an incognito browser tab or alternate profile with the invite link:
+   - Verify that guest contributors can view the event context without seeing private journal reflections.
+   - Submit a guest memory contribution with an emotional tone and favorite moment.
+6. Return to the owner's view on `/capsules/:id`:
+   - Verify the new contribution appears in real-time.
+   - Click **"Generate AI Memory Mosaic"** (`#generate-mosaic-top-btn`).
+   - Verify that Gemini synthesizes all perspectives into a unified narrative story, individual vantage points, timeline highlights, and collective takeaways.
+   - Open the full modal view (`#memory-mosaic-modal-content`) and test the **"Copy Mosaic Story"** button.
+
+### Test Case 12: Valeria Live Audio Streaming & Mindful Voice Companion
+1. Click the floating **"Live Audio"** orb button in the header or navigation bar.
+2. Verify that the browser requests microphone permissions (`requestFramePermissions: ["microphone"]`).
+3. Upon granting access, verify that a secure WebSocket connection is established to `/ws/live` with Firebase auth token authentication.
+4. Verify that the floating audio visualizer orb pulses smoothly with voice activity.
+5. Speak naturally into the microphone (e.g., *"Valeria, I'm feeling a bit scattered today with too many priorities. Can you help me center my focus?"*).
+6. Verify that:
+   - User input transcript streams in real-time.
+   - Gemini responds via bidirectional low-latency audio using `gemini-3.1-flash-live-preview`.
+   - Model spoken words stream in synchronized real-time text transcription chunks.
+7. Test barge-in / interruption: speak while Valeria is responding and verify that playback immediately pauses and yields to your voice.
+8. Close the voice session and confirm that the audio stream and WebSocket terminate cleanly without orphaned background processes.
 
 

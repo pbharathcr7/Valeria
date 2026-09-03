@@ -49,7 +49,8 @@ import {
   setDoc, 
   sanitizePayload, 
   loadUserDocuments,
-  loadDocumentChunks 
+  loadDocumentChunks,
+  getAuthToken
 } from '../lib/firebase';
 import { GeminiAuroraOrb } from '../components/GeminiAuroraOrb';
 
@@ -796,8 +797,11 @@ export const LivePage: React.FC<LivePageProps> = ({
     isSessionActiveRef.current = true;
 
     try {
+      const authToken = await getAuthToken();
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws/live`;
+      const wsUrl = authToken 
+        ? `${protocol}//${window.location.host}/ws/live?token=${encodeURIComponent(authToken)}`
+        : `${protocol}//${window.location.host}/ws/live`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
@@ -806,6 +810,7 @@ export const LivePage: React.FC<LivePageProps> = ({
         const grounding = buildGroundingContext();
         ws.send(JSON.stringify({
           type: 'setup',
+          authToken: authToken || undefined,
           voiceName: selectedVoice,
           groundingContext: grounding
         }));

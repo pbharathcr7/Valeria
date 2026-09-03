@@ -23,6 +23,7 @@ import {
   DetectedAction
 } from '../types';
 import { ActionCards } from './ActionCards';
+import { authFetch } from '../lib/firebase';
 
 interface ReflectionCanvasProps {
   initialEntry?: JournalEntry | null;
@@ -251,7 +252,7 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
     }));
 
     try {
-      const response = await fetch('/api/reflect/chat', {
+      const response = await authFetch('/api/reflect/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -374,7 +375,7 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
     setErrorMessage(null);
 
     try {
-      const resp = await fetch('/api/reflect/synthesize', {
+      const resp = await authFetch('/api/reflect/synthesize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

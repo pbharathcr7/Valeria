@@ -22,7 +22,8 @@ import {
   loadUserDocuments, 
   saveDocument, 
   saveDocumentChunks, 
-  deleteUserDocument 
+  deleteUserDocument,
+  authFetch
 } from '../lib/firebase';
 import { DocumentChatCanvas } from '../components/DocumentChatCanvas';
 
@@ -160,7 +161,7 @@ export const DocumentsPage: React.FC<DocumentsPageProps> = ({ user, onNewReflect
       setUploadProgressMsg('Extracting text, pages & vector embeddings...');
 
       // Call backend PDF processing service
-      const response = await fetch('/api/documents/process', {
+      const response = await authFetch('/api/documents/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
