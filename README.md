@@ -21,6 +21,12 @@ Valeria extends the Google AI Studio Personal Gemini Journal into a production-i
 * Collaborative Life Archives with role-based access control and AI Memory Mosaic.
 * Firebase Authentication and Firestore user isolation for secure multi-user support.
 
+### Demo Preview
+![image alt](https://github.com/pbharathcr7/Valeria/blob/1b3aa25c0d68d3a2ad21332a1b14ce8cbc62ca6b/dashboard.png)
+![image alt](https://github.com/pbharathcr7/Valeria/blob/1b3aa25c0d68d3a2ad21332a1b14ce8cbc62ca6b/voice.png)
+![image alt](https://github.com/pbharathcr7/Valeria/blob/1b3aa25c0d68d3a2ad21332a1b14ce8cbc62ca6b/knowledge-base.png)
+![image alt](https://github.com/pbharathcr7/Valeria/blob/1b3aa25c0d68d3a2ad21332a1b14ce8cbc62ca6b/life-archive.png)
+
 ### System Architecture
 ![image alt](https://github.com/pbharathcr7/Valeria/blob/ceb659befdbe05dbecbb8e5075592a94e73fc714/architecture%20diagram.svg)
 
