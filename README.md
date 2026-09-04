@@ -13,13 +13,13 @@ Valeria extends the Google AI Studio Personal Gemini Journal into a production-i
 
 **Major additions include:**
 
-🎙️ Live Voice Reflection with Gemini Live over WebSockets.
-☁️ Long-Term Cognitive Memory that synthesizes recurring goals, strengths, and growth trends.
-🧠 Weekly AI Insights with Gmail sharing.
-📅 Google Calendar integration from reflection conversations.
-📄 Document Intelligence (RAG) with PDF upload and page-grounded answers.
-📸 Collaborative Life Archives with role-based access control and AI Memory Mosaic.
-🔐 Firebase Authentication and Firestore user isolation for secure multi-user support.
+### 🎙️ Live Voice Reflection with Gemini Live over WebSockets.
+### ☁️ Long-Term Cognitive Memory that synthesizes recurring goals, strengths, and growth trends.
+### 🧠 Weekly AI Insights with Gmail sharing.
+### 📅 Google Calendar integration from reflection conversations.
+### 📄 Document Intelligence (RAG) with PDF upload and page-grounded answers.
+### 📸 Collaborative Life Archives with role-based access control and AI Memory Mosaic.
+### 🔐 Firebase Authentication and Firestore user isolation for secure multi-user support.
 
 ## Demo Preview
 **▶️ Watch the complete demo walkthrough:** [Valeria Demo Video (Google Drive)](https://drive.google.com/file/d/1v2VXRFr-qjjv5v3ECkTdIiEJeRbMfOHH/view?usp=sharing)
