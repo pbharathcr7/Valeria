@@ -9,8 +9,6 @@ Valeria is an AI-powered cognitive journal that transforms journaling into an on
 
 ## What I Built Beyond the Starter Journal
 
-**Valeria extends the Google AI Studio Personal Gemini Journal into a production-inspired cognitive journaling experience.**
-
 ### 🎙️ Live Voice Reflection with Gemini Live over WebSockets.
 ### ☁️ Long-Term Cognitive Memory that synthesizes recurring goals, strengths, and growth trends.
 ### 🧠 Weekly AI Insights with Gmail sharing.
