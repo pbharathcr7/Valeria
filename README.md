@@ -22,6 +22,8 @@ Valeria extends the Google AI Studio Personal Gemini Journal into a production-i
 * Firebase Authentication and Firestore user isolation for secure multi-user support.
 
 ### Demo Preview
+**▶️ Watch the complete demo walkthrough:**  
+[Valeria Demo Video (Google Drive)](https://drive.google.com/file/d/1v2VXRFr-qjjv5v3ECkTdIiEJeRbMfOHH/view?usp=sharing)
 ![image alt](https://github.com/pbharathcr7/Valeria/blob/1b3aa25c0d68d3a2ad21332a1b14ce8cbc62ca6b/dashboard.png)
 ![image alt](https://github.com/pbharathcr7/Valeria/blob/1b3aa25c0d68d3a2ad21332a1b14ce8cbc62ca6b/voice.png)
 ![image alt](https://github.com/pbharathcr7/Valeria/blob/1b3aa25c0d68d3a2ad21332a1b14ce8cbc62ca6b/knowledge-base.png)
