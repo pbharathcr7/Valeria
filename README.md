@@ -7,6 +7,23 @@ Valeria is an AI-powered cognitive journal that transforms journaling into an on
 
 ---
 
+### What I Built Beyond the Starter Journal
+
+Valeria extends the Google AI Studio Personal Gemini Journal into a production-inspired cognitive journaling experience.
+
+**Major additions include:**
+
+* Live Voice Reflection with Gemini Live over WebSockets.
+* Long-Term Cognitive Memory that synthesizes recurring goals, strengths, and growth trends.
+* Weekly AI Insights with Gmail sharing.
+* Google Calendar integration from reflection conversations.
+* Document Intelligence (RAG) with PDF upload and page-grounded answers.
+* Collaborative Life Archives with role-based access control and AI Memory Mosaic.
+* Firebase Authentication and Firestore user isolation for secure multi-user support.
+
+### System Architecture
+![image alt](https://github.com/pbharathcr7/Valeria/blob/ceb659befdbe05dbecbb8e5075592a94e73fc714/architecture%20diagram.svg)
+
 ## 🔒 Threat Model & Security Posture
 
 ### The 5 Threat Zones Analysis
