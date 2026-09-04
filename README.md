@@ -7,7 +7,7 @@ Valeria is an AI-powered cognitive journal that transforms journaling into an on
 
 ---
 
-### What I Built Beyond the Starter Journal
+## What I Built Beyond the Starter Journal
 
 Valeria extends the Google AI Studio Personal Gemini Journal into a production-inspired cognitive journaling experience.
 
@@ -21,7 +21,7 @@ Valeria extends the Google AI Studio Personal Gemini Journal into a production-i
 * Collaborative Life Archives with role-based access control and AI Memory Mosaic.
 * Firebase Authentication and Firestore user isolation for secure multi-user support.
 
-### Demo Preview
+## Demo Preview
 **▶️ Watch the complete demo walkthrough:** [Valeria Demo Video (Google Drive)](https://drive.google.com/file/d/1v2VXRFr-qjjv5v3ECkTdIiEJeRbMfOHH/view?usp=sharing)
 
 ![image alt](https://github.com/pbharathcr7/Valeria/blob/1b3aa25c0d68d3a2ad21332a1b14ce8cbc62ca6b/dashboard.png)
@@ -29,7 +29,7 @@ Valeria extends the Google AI Studio Personal Gemini Journal into a production-i
 ![image alt](https://github.com/pbharathcr7/Valeria/blob/1b3aa25c0d68d3a2ad21332a1b14ce8cbc62ca6b/knowledge-base.png)
 ![image alt](https://github.com/pbharathcr7/Valeria/blob/1b3aa25c0d68d3a2ad21332a1b14ce8cbc62ca6b/life-archive.png)
 
-### System Architecture
+## System Architecture
 ![image alt](https://github.com/pbharathcr7/Valeria/blob/ceb659befdbe05dbecbb8e5075592a94e73fc714/architecture%20diagram.svg)
 
 ## 🔒 Threat Model & Security Posture
